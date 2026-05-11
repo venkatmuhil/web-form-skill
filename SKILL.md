@@ -35,9 +35,11 @@ tone, UI patterns, and email integration. Ask these questions upfront (all at on
 | 6 | Which email service? (Brevo · Resend · SendGrid · Mailgun · Postmark · None/webhook) | Routes to the right integration |
 | 7 | What email address should receive notifications? | `NOTIFY_EMAIL` env var |
 | 8 | What sender name and email should appear on outgoing emails? | `SENDER_NAME` / `SENDER_EMAIL` env vars |
+| 9 | Do you want invisible CAPTCHA (reCAPTCHA v3) for bot protection? Default: **Yes** for public forms | Adds reCAPTCHA v3 to component + API route |
 
 **Skip questions whose answers are already clear from context.** If the user says
 "add a contact form to my Next.js SaaS with Resend", skip Q1, Q6, and partially Q2.
+Skip Q9 if the form is behind authentication (auto-answer: No). Default **Yes** for all public-facing forms unless the user says otherwise.
 
 After the interview, confirm the plan before generating:
 > "Here's what I'll build: [form type] for [business], fields: [list], submits via [email service],
@@ -232,6 +234,18 @@ Read `references/accessibility-patterns.md` for complex patterns (file upload, s
 - JS: live blur feedback, cross-field checks, custom messages
 - Disable submit during loading; re-enable on error
 
+### Security layer (non-negotiable — always add to every form)
+
+Read `references/security-patterns.md` for full copy-paste code for each item.
+
+**Always include in the form component — requires zero visible UI changes:**
+
+1. **Honeypot field** — hidden `<input name="website">` placed just before the submit button. Add `website: ""` to the `FormData` type and `INITIAL` state. See `security-patterns.md → Honeypot`.
+
+2. **Submission timer** — `const [formLoadTime] = useState(() => Date.now());`. Include `_t: formLoadTime` in the JSON body on submit. See `security-patterns.md → Submission time guard`.
+
+3. **reCAPTCHA v3** — include if Q9 = Yes (or for any public form where Q9 was not explicitly No). Wrap the app with `<GoogleReCaptchaProvider>`, call `executeRecaptcha("contact_form")` on submit, include the token as `recaptchaToken` in the body. See `security-patterns.md → reCAPTCHA v3`.
+
 ---
 
 ## Phase 5 — API Route & Email Integration
@@ -249,13 +263,23 @@ Read `references/email-services.md` for all service integrations (Brevo, Resend,
 | **Postmark** | Best deliverability; transactional focus | Trial only | `postmark` |
 | **None** | Webhook / custom handler | — | — |
 
-### Every API route does three things
-1. **Validate** required fields server-side → `400` + clear error if missing
-2. **Notify team** — internal email; full submission table; `replyTo` = submitter's email
-3. **Confirm submitter** — auto-reply with CTA-matching copy
+### Every API route does these things (in order)
 
-**Brevo only — also do:**
-4. **Sync contact** — `createContact` with `updateEnabled: true` → upsert into CRM list
+1. **Body size guard** — reject raw request body > 50 KB before JSON.parse
+2. **Sanitize inputs** — `sanitizeInput()` on name (100), email (254), message (5000), all text fields
+3. **Validate required fields** — return `400` if name/email missing or email fails regex
+4. **Bot guards** — all silent `200 { success: true }` on trigger (never tip off bots):
+   - Rate limit by IP (in-memory default; upgrade to Upstash for multi-instance)
+   - Honeypot check (`body.website` non-empty)
+   - Submission time guard (`body._t` arrived in < 3 seconds)
+   - Duplicate email check (same email within 5 minutes)
+   - Spam keyword filter
+   - reCAPTCHA v3 score check (score < 0.5) — if Q9 = Yes
+5. **Notify team** — `escapeHtml()` on every `${value}` in the HTML email body; `sanitizeInput()` in email subjects
+6. **Confirm submitter** — `escapeHtml(name)` in greeting; no other user data in confirmation body
+7. **Sync contact** (Brevo only) — `createContact` with `updateEnabled: true` → upsert into CRM list
+
+Read `references/security-patterns.md` for copy-paste implementations of all guards and utilities used in steps 1–6.
 
 **Forms with file upload fields** must submit as `multipart/form-data`, not JSON.
 The API route reads the file with `await req.formData()` and attaches it to the notification email.
@@ -270,6 +294,9 @@ See `references/email-services.md → File Attachments` for per-service attachme
 | `SENDER_EMAIL` | Verified sender address (must match verified domain) |
 | `NOTIFY_EMAIL` | Team inbox for submission notifications |
 | `BREVO_LIST_ID` | Brevo only — list ID to add contacts to |
+| `ALLOWED_ORIGINS` | Comma-separated allowed origins e.g. `https://yourdomain.com` (optional CORS guard) |
+| `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` | reCAPTCHA v3 site key — required if Q9 = Yes |
+| `RECAPTCHA_SECRET_KEY` | reCAPTCHA v3 secret key — server only, required if Q9 = Yes |
 
 ---
 
@@ -290,13 +317,28 @@ Always output this block after generating files:
    SENDER_EMAIL="hello@yourdomain.com"
    NOTIFY_EMAIL="team@yourdomain.com"
    [SERVICE]_API_KEY="your_key_here"
-   # BREVO_LIST_ID=3   ← Brevo only
+   # BREVO_LIST_ID=3                              ← Brevo only
+   ALLOWED_ORIGINS="https://yourdomain.com"
+   # NEXT_PUBLIC_RECAPTCHA_SITE_KEY="6Le..."      ← Q9 = Yes
+   # RECAPTCHA_SECRET_KEY="6Le..."                ← Q9 = Yes
 
 🌐 Email service setup:
    1. Create account at [service URL]
    2. Get API key → Settings → API Keys
    3. Verify sender domain (add DNS records they provide)
    4. [Brevo] Create contact list → note the list ID
+
+🔒 Security defaults included:
+   ✅ escapeHtml — XSS prevention in email HTML
+   ✅ sanitizeInput — CRLF strip + length caps
+   ✅ Email regex validation + body size guard (50 KB)
+   ✅ Honeypot field + submission time guard (3s minimum)
+   ✅ In-memory rate limit (5 req / 60s / IP)
+   ✅ Duplicate email guard (5-min window) + spam keyword filter
+   [ ] reCAPTCHA v3 — set NEXT_PUBLIC_RECAPTCHA_SITE_KEY + RECAPTCHA_SECRET_KEY
+       npm install react-google-recaptcha-v3
+   [ ] Upgrade rate limiter to Upstash for multi-instance / serverless
+       npm install @upstash/ratelimit @upstash/redis
 
 🧪 Test locally:
    npm run dev → fill form → check team inbox + submitter inbox
@@ -326,3 +368,4 @@ Pattern: `Contact Info → Project Details → Review & Submit`
 | `references/form-presets.md` | Phase 3 — always; field definitions per business type |
 | `references/email-services.md` | Phase 5 — integration code for all email services; file attachment syntax |
 | `references/accessibility-patterns.md` | Pills, star ratings, file upload, conditional/progressive patterns, Typeform-style, multi-step |
+| `references/security-patterns.md` | Phase 4 + Phase 5 — always; all security utilities (escapeHtml, sanitizeInput, rate limiter, honeypot, time guard, duplicate detection, spam filter, reCAPTCHA v3) |

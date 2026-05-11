@@ -240,6 +240,41 @@ UI pattern reminder (from SKILL.md Phase 3):
 
 ---
 
+## Security Fields (always include in every form)
+
+These two fields are **invisible to users** and require no design changes.
+They must appear in every generated form regardless of preset or business type.
+Full copy-paste code in `references/security-patterns.md`.
+
+### Honeypot field
+A hidden `<input name="website">` placed just before the submit button.
+Real users never see or touch it. Bots auto-fill it.
+Server silently returns `200 { success: true }` when the field is non-empty — never a `400`.
+
+```html
+<!-- Place just before the submit button -->
+<div aria-hidden="true" style="position:absolute;left:-9999px;height:0;overflow:hidden">
+  <label for="website">Leave this blank</label>
+  <input type="text" id="website" name="website" tabindex="-1" autocomplete="off" value="">
+</div>
+```
+
+React equivalent: see `references/security-patterns.md → Honeypot`.
+Add `website: ""` to the `FormData` type and `INITIAL` state.
+
+### Form timer hidden field
+Records the timestamp when the page loaded. Server rejects submissions that arrive in less than 3 seconds — faster than any human can read and fill a form.
+
+```html
+<!-- Place just before the submit button -->
+<input type="hidden" id="_t" name="_t">
+<script>document.getElementById('_t').value = Date.now();</script>
+```
+
+React equivalent: `const [formLoadTime] = useState(() => Date.now());` — include `_t: formLoadTime` in the JSON body on submit.
+
+---
+
 ## Common Field Patterns
 
 ### Phone number
@@ -271,11 +306,5 @@ Add JS to validate `file.size` and `file.type` on change.
 ```
 
 ### Honeypot (spam prevention)
-```html
-<!-- Hidden from real users, bots fill it in -->
-<div aria-hidden="true" style="position:absolute;left:-9999px">
-  <label for="website">Leave this blank</label>
-  <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
-</div>
-```
-Server-side: reject submissions where `website` field is non-empty.
+See `references/security-patterns.md → Honeypot` for full HTML and React patterns.
+Also see the **Security Fields** section above — the honeypot is mandatory in every form.

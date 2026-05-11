@@ -33,6 +33,11 @@ BREVO_LIST_ID=3                        # optional — for contact sync
 // src/app/api/contact/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import * as Brevo from "@getbrevo/brevo";
+import { escapeHtml }     from "@/utils/escapeHtml";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
 
 const apiInstance = new Brevo.TransactionalEmailsApi();
 apiInstance.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY!);
@@ -41,51 +46,88 @@ const contactsApi = new Brevo.ContactsApi();
 contactsApi.setApiKey(Brevo.ContactsApiApiKeys.apiKey, process.env.BREVO_API_KEY!);
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { name, email, ...rest } = body;
+  // Body size guard — reject before JSON.parse
+  const raw = await req.text();
+  if (raw.length > 50_000) {
+    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  }
+  const body = JSON.parse(raw);
 
-  // 1. Server-side validation
+  // Sanitize inputs — CRLF strip + length caps
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+  // sanitize additional preset fields similarly, e.g.:
+  // const company = sanitizeInput(body.company, 150);
+  const rest = Object.fromEntries(
+    Object.entries(body)
+      .filter(([k]) => !["name","email","message","website","_t","recaptchaToken"].includes(k))
+      .map(([k, v]) => [k, Array.isArray(v) ? v.map(s => sanitizeInput(s, 200)) : sanitizeInput(v, 200)])
+  );
+
+  // Required field + email format validation
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
   }
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+  }
 
-  // 2. Build submission table for notification email
+  // Bot / abuse guards (all silent-200 — never tip off bots)
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim()
+           ?? req.headers.get("x-real-ip")
+           ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+  }
+  if (body.website)                                              return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
+  if (isSpam(message))                                           return NextResponse.json({ success: true });
+
+  // reCAPTCHA v3 — uncomment when Q9 = Yes:
+  // const captchaOk = await verifyRecaptcha(body.recaptchaToken ?? "");
+  // if (!captchaOk) return NextResponse.json({ success: true });
+  // (see references/security-patterns.md → reCAPTCHA v3 for verifyRecaptcha implementation)
+
+  // Build submission table — escapeHtml on all user values
   const rows = [
-    ["Name", name], ["Email", email],
+    ["Name", name], ["Email", email], ["Message", message],
     ...Object.entries(rest).map(([k, v]) => [
       k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
       Array.isArray(v) ? v.join(", ") : String(v),
     ]),
   ];
   const tableRows = rows
-    .map(([k, v]) => `<tr><td style="padding:6px 12px;font-weight:600">${k}</td><td style="padding:6px 12px">${v}</td></tr>`)
+    .map(([k, v]) => `<tr><td style="padding:6px 12px;font-weight:600">${escapeHtml(k)}</td><td style="padding:6px 12px">${escapeHtml(v)}</td></tr>`)
     .join("");
 
-  // 3. Notify team
+  // Notify team
   await apiInstance.sendTransacEmail({
     sender: { name: process.env.SENDER_NAME!, email: process.env.SENDER_EMAIL! },
     to: [{ email: process.env.NOTIFY_EMAIL! }],
     replyTo: { email, name },
-    subject: `New enquiry from ${name}`,
+    subject: `New enquiry from ${sanitizeInput(name, 100)}`,
     htmlContent: `
       <h2 style="font-family:sans-serif">New Contact Form Submission</h2>
       <table style="font-family:sans-serif;border-collapse:collapse">${tableRows}</table>
     `,
   });
 
-  // 4. Confirm submitter
+  // Confirm submitter
   await apiInstance.sendTransacEmail({
     sender: { name: process.env.SENDER_NAME!, email: process.env.SENDER_EMAIL! },
     to: [{ email, name }],
     subject: "We received your message!",
     htmlContent: `
-      <p style="font-family:sans-serif">Hi ${name},</p>
+      <p style="font-family:sans-serif">Hi ${escapeHtml(name)},</p>
       <p style="font-family:sans-serif">Thanks for reaching out — we'll be in touch shortly.</p>
       <p style="font-family:sans-serif">— The Team</p>
     `,
   });
 
-  // 5. Sync contact to Brevo CRM list (optional)
+  // Sync contact to Brevo CRM list (optional)
   if (process.env.BREVO_LIST_ID) {
     await contactsApi.createContact({
       email,
@@ -131,26 +173,67 @@ NOTIFY_EMAIL="team@yourdomain.com"
 // src/app/api/contact/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { escapeHtml }     from "@/utils/escapeHtml";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { name, email, ...rest } = body;
+  // Body size guard
+  const raw = await req.text();
+  if (raw.length > 50_000) {
+    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  }
+  const body = JSON.parse(raw);
 
+  // Sanitize inputs
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+  const rest = Object.fromEntries(
+    Object.entries(body)
+      .filter(([k]) => !["name","email","message","website","_t","recaptchaToken"].includes(k))
+      .map(([k, v]) => [k, Array.isArray(v) ? v.map(s => sanitizeInput(s, 200)) : sanitizeInput(v, 200)])
+  );
+
+  // Required field + email format validation
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
   }
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+  }
 
+  // Bot / abuse guards
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim()
+           ?? req.headers.get("x-real-ip")
+           ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+  }
+  if (body.website)                                              return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
+  if (isSpam(message))                                           return NextResponse.json({ success: true });
+
+  // reCAPTCHA v3 — uncomment when Q9 = Yes:
+  // const captchaOk = await verifyRecaptcha(body.recaptchaToken ?? "");
+  // if (!captchaOk) return NextResponse.json({ success: true });
+
+  // Build submission table — escapeHtml on all user values
   const rows = [
-    ["Name", name], ["Email", email],
+    ["Name", name], ["Email", email], ["Message", message],
     ...Object.entries(rest).map(([k, v]) => [
       k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
       Array.isArray(v) ? v.join(", ") : String(v),
     ]),
   ];
   const tableHtml = rows
-    .map(([k, v]) => `<tr><td style="padding:6px 12px;font-weight:600">${k}</td><td style="padding:6px 12px">${v}</td></tr>`)
+    .map(([k, v]) => `<tr><td style="padding:6px 12px;font-weight:600">${escapeHtml(k)}</td><td style="padding:6px 12px">${escapeHtml(v)}</td></tr>`)
     .join("");
 
   // Notify team
@@ -158,7 +241,7 @@ export async function POST(req: NextRequest) {
     from: `${process.env.SENDER_NAME} <${process.env.SENDER_EMAIL}>`,
     to: [process.env.NOTIFY_EMAIL!],
     reply_to: email,
-    subject: `New enquiry from ${name}`,
+    subject: `New enquiry from ${sanitizeInput(name, 100)}`,
     html: `<h2>New Form Submission</h2><table style="border-collapse:collapse">${tableHtml}</table>`,
   });
 
@@ -167,7 +250,7 @@ export async function POST(req: NextRequest) {
     from: `${process.env.SENDER_NAME} <${process.env.SENDER_EMAIL}>`,
     to: [email],
     subject: "We received your message!",
-    html: `<p>Hi ${name},</p><p>Thanks for reaching out — we'll be in touch shortly.</p><p>— The Team</p>`,
+    html: `<p>Hi ${escapeHtml(name)},</p><p>Thanks for reaching out — we'll be in touch shortly.</p><p>— The Team</p>`,
   });
 
   return NextResponse.json({ success: true });
@@ -206,34 +289,77 @@ NOTIFY_EMAIL="team@yourdomain.com"
 // src/app/api/contact/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import sgMail from "@sendgrid/mail";
+import { escapeHtml }     from "@/utils/escapeHtml";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { name, email, ...rest } = body;
+  // Body size guard
+  const raw = await req.text();
+  if (raw.length > 50_000) {
+    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  }
+  const body = JSON.parse(raw);
 
+  // Sanitize inputs
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+  const rest = Object.fromEntries(
+    Object.entries(body)
+      .filter(([k]) => !["name","email","message","website","_t","recaptchaToken"].includes(k))
+      .map(([k, v]) => [k, Array.isArray(v) ? v.map(s => sanitizeInput(s, 200)) : sanitizeInput(v, 200)])
+  );
+
+  // Required field + email format validation
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
   }
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+  }
 
-  const rows = Object.entries({ name, email, ...rest })
-    .map(([k, v]) => `<tr><td><strong>${k}</strong></td><td>${Array.isArray(v) ? v.join(", ") : v}</td></tr>`)
+  // Bot / abuse guards
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim()
+           ?? req.headers.get("x-real-ip")
+           ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+  }
+  if (body.website)                                              return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
+  if (isSpam(message))                                           return NextResponse.json({ success: true });
+
+  // reCAPTCHA v3 — uncomment when Q9 = Yes:
+  // const captchaOk = await verifyRecaptcha(body.recaptchaToken ?? "");
+  // if (!captchaOk) return NextResponse.json({ success: true });
+
+  // Build submission table — escapeHtml on all user values
+  const rows = Object.entries({ name, email, message, ...rest })
+    .map(([k, v]) => `<tr><td><strong>${escapeHtml(k)}</strong></td><td>${escapeHtml(Array.isArray(v) ? v.join(", ") : String(v))}</td></tr>`)
     .join("");
 
+  // Notify team
   await sgMail.send({
     to: process.env.NOTIFY_EMAIL!,
     from: { name: process.env.SENDER_NAME!, email: process.env.SENDER_EMAIL! },
     replyTo: email,
-    subject: `New enquiry from ${name}`,
+    subject: `New enquiry from ${sanitizeInput(name, 100)}`,
     html: `<table>${rows}</table>`,
   });
 
+  // Confirm submitter
   await sgMail.send({
     to: email,
     from: { name: process.env.SENDER_NAME!, email: process.env.SENDER_EMAIL! },
     subject: "We received your message!",
-    html: `<p>Hi ${name}, thanks for reaching out — we'll be in touch shortly.</p>`,
+    html: `<p>Hi ${escapeHtml(name)}, thanks for reaching out — we'll be in touch shortly.</p>`,
   });
 
   return NextResponse.json({ success: true });
@@ -273,6 +399,10 @@ NOTIFY_EMAIL="team@yourdomain.com"
 import { NextRequest, NextResponse } from "next/server";
 import Mailgun from "mailgun.js";
 import FormData from "form-data";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
 
 const mg = new Mailgun(FormData).client({
   username: "api",
@@ -283,30 +413,68 @@ const mg = new Mailgun(FormData).client({
 });
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { name, email, ...rest } = body;
+  // Body size guard
+  const raw = await req.text();
+  if (raw.length > 50_000) {
+    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  }
+  const body = JSON.parse(raw);
 
+  // Sanitize inputs (CRLF strip is critical for Mailgun — h:Reply-To header injection risk)
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+  const rest = Object.fromEntries(
+    Object.entries(body)
+      .filter(([k]) => !["name","email","message","website","_t","recaptchaToken"].includes(k))
+      .map(([k, v]) => [k, Array.isArray(v) ? v.map(s => sanitizeInput(s, 200)) : sanitizeInput(v, 200)])
+  );
+
+  // Required field + email format validation
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
   }
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+  }
 
-  const text = Object.entries({ name, email, ...rest })
+  // Bot / abuse guards
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim()
+           ?? req.headers.get("x-real-ip")
+           ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+  }
+  if (body.website)                                              return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
+  if (isSpam(message))                                           return NextResponse.json({ success: true });
+
+  // reCAPTCHA v3 — uncomment when Q9 = Yes:
+  // const captchaOk = await verifyRecaptcha(body.recaptchaToken ?? "");
+  // if (!captchaOk) return NextResponse.json({ success: true });
+
+  // Build plain-text notification (Mailgun default — safe from HTML injection)
+  const text = Object.entries({ name, email, message, ...rest })
     .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
     .join("\n");
 
+  // Notify team
   await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
     from: `${process.env.SENDER_NAME} <${process.env.SENDER_EMAIL}>`,
     to: [process.env.NOTIFY_EMAIL!],
-    "h:Reply-To": email,
-    subject: `New enquiry from ${name}`,
+    "h:Reply-To": sanitizeInput(email, 254), // belt-and-suspenders: already sanitized above
+    subject: `New enquiry from ${sanitizeInput(name, 100)}`,
     text,
   });
 
+  // Confirm submitter
   await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
     from: `${process.env.SENDER_NAME} <${process.env.SENDER_EMAIL}>`,
     to: [email],
     subject: "We received your message!",
-    text: `Hi ${name},\n\nThanks for reaching out — we'll be in touch shortly.\n\n— The Team`,
+    text: `Hi ${sanitizeInput(name, 100)},\n\nThanks for reaching out — we'll be in touch shortly.\n\n— The Team`,
   });
 
   return NextResponse.json({ success: true });
@@ -344,35 +512,78 @@ NOTIFY_EMAIL="team@yourdomain.com"
 ```ts
 import { NextRequest, NextResponse } from "next/server";
 import * as postmark from "postmark";
+import { escapeHtml }     from "@/utils/escapeHtml";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
 
 const client = new postmark.ServerClient(process.env.POSTMARK_SERVER_TOKEN!);
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { name, email, ...rest } = body;
+  // Body size guard
+  const raw = await req.text();
+  if (raw.length > 50_000) {
+    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  }
+  const body = JSON.parse(raw);
 
+  // Sanitize inputs
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+  const rest = Object.fromEntries(
+    Object.entries(body)
+      .filter(([k]) => !["name","email","message","website","_t","recaptchaToken"].includes(k))
+      .map(([k, v]) => [k, Array.isArray(v) ? v.map(s => sanitizeInput(s, 200)) : sanitizeInput(v, 200)])
+  );
+
+  // Required field + email format validation
   if (!name || !email) {
     return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
   }
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+  }
 
-  const rows = Object.entries({ name, email, ...rest })
-    .map(([k, v]) => `<tr><td><strong>${k}</strong></td><td>${Array.isArray(v) ? v.join(", ") : v}</td></tr>`)
+  // Bot / abuse guards
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim()
+           ?? req.headers.get("x-real-ip")
+           ?? "unknown";
+  if (!checkRateLimit(ip)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+  }
+  if (body.website)                                              return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
+  if (isSpam(message))                                           return NextResponse.json({ success: true });
+
+  // reCAPTCHA v3 — uncomment when Q9 = Yes:
+  // const captchaOk = await verifyRecaptcha(body.recaptchaToken ?? "");
+  // if (!captchaOk) return NextResponse.json({ success: true });
+
+  // Build submission table — escapeHtml on all user values
+  const rows = Object.entries({ name, email, message, ...rest })
+    .map(([k, v]) => `<tr><td><strong>${escapeHtml(k)}</strong></td><td>${escapeHtml(Array.isArray(v) ? v.join(", ") : String(v))}</td></tr>`)
     .join("");
 
+  // Notify team
   await client.sendEmail({
     From: `${process.env.SENDER_NAME} <${process.env.SENDER_EMAIL}>`,
     To: process.env.NOTIFY_EMAIL!,
     ReplyTo: email,
-    Subject: `New enquiry from ${name}`,
+    Subject: `New enquiry from ${sanitizeInput(name, 100)}`,
     HtmlBody: `<table>${rows}</table>`,
     MessageStream: "outbound",
   });
 
+  // Confirm submitter
   await client.sendEmail({
     From: `${process.env.SENDER_NAME} <${process.env.SENDER_EMAIL}>`,
     To: email,
     Subject: "We received your message!",
-    HtmlBody: `<p>Hi ${name},</p><p>Thanks for reaching out — we'll be in touch shortly.</p>`,
+    HtmlBody: `<p>Hi ${escapeHtml(name)},</p><p>Thanks for reaching out — we'll be in touch shortly.</p>`,
     MessageStream: "outbound",
   });
 
@@ -403,14 +614,41 @@ const res = await fetch(process.env.NEXT_PUBLIC_WEBHOOK_URL!, {
 
 ### Minimal Next.js API route stub
 ```ts
+import { NextRequest, NextResponse } from "next/server";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
+
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { name, email } = body;
+  // Body size guard
+  const raw = await req.text();
+  if (raw.length > 50_000) {
+    return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  }
+  const body = JSON.parse(raw);
+
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+
   if (!name || !email) {
     return NextResponse.json({ error: "Required fields missing." }, { status: 400 });
   }
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+  }
+
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  if (!checkRateLimit(ip))                                       return NextResponse.json({ error: "Too many requests.", }, { status: 429 });
+  if (body.website)                                              return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
+  if (isSpam(message))                                           return NextResponse.json({ success: true });
+
   // TODO: save to DB, forward to webhook, etc.
-  console.log("Form submission:", body);
+  console.log("Form submission:", { name, email, message });
   return NextResponse.json({ success: true });
 }
 ```

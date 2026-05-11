@@ -6,6 +6,52 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.0] — 2026-05-12
+
+### Added
+
+#### references/security-patterns.md (new file)
+- `escapeHtml` utility — prevents XSS via unsanitized values in HTML email bodies
+- `sanitizeInput` utility — strips CRLF (email header injection prevention), trims, enforces max lengths per field type
+- Server-side email regex validation pattern
+- Body size guard (50 KB limit before JSON.parse)
+- CORS origin check via `ALLOWED_ORIGINS` env var
+- In-memory rate limiter (`utils/rateLimiter.ts`) — 5 req / 60s per IP with auto cleanup
+- Upstash Redis rate limiter — documented upgrade path for multi-instance / serverless deployments
+- Honeypot field — React/TSX + plain HTML versions with silent `200` server check
+- Submission time guard — client timestamp + server-side 3-second minimum check
+- Duplicate submission detection (`utils/duplicateGuard.ts`) — same email blocked for 5-minute TTL window
+- Spam keyword filter (`utils/spamFilter.ts`) — configurable server-side keyword list
+- reCAPTCHA v3 integration — invisible CAPTCHA; client `GoogleReCaptchaProvider` + `executeRecaptcha`; server `verifyRecaptcha` with score ≥ 0.5 threshold
+- Security checklist block for Phase 6 output
+
+#### SKILL.md
+- Phase 1: Q9 added — reCAPTCHA v3 opt-in (default Yes for public forms)
+- Phase 4: "Security layer (non-negotiable)" subsection — honeypot, submission timer, reCAPTCHA
+- Phase 5: "Every API route does three things" replaced with 7-step ordered security-first contract
+- Phase 5: `ALLOWED_ORIGINS`, `NEXT_PUBLIC_RECAPTCHA_SITE_KEY`, `RECAPTCHA_SECRET_KEY` added to env vars table
+- Phase 6: `🔒 Security defaults included` checklist block added to post-generation output
+- Reference Files table: `references/security-patterns.md` entry added
+
+#### references/email-services.md
+- All 5 service templates (Brevo, Resend, SendGrid, Mailgun, Postmark) and webhook stub updated:
+  - Body size guard before JSON.parse
+  - Full input sanitization block (`sanitizeInput` on all fields)
+  - Email regex validation
+  - Complete bot-guard chain: rate limit → honeypot → time guard → duplicate → spam filter
+  - Commented reCAPTCHA v3 hook (enabled when Q9 = Yes)
+  - `escapeHtml()` applied to every `${value}` interpolated into HTML email bodies
+  - Mailgun `h:Reply-To` header injection specifically hardened
+
+#### references/form-presets.md
+- New **Security Fields** section (mandatory, before Common Field Patterns) — honeypot + form timer with HTML and React patterns
+- Honeypot entry in Common Field Patterns replaced with cross-reference to security-patterns.md
+
+### Changed
+- README updated to document security defaults table and updated structure/phases
+
+---
+
 ## [1.0.0] — 2026-05-11
 
 ### Added

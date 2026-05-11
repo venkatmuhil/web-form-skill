@@ -11,6 +11,26 @@ job applications, surveys, requirements gathering, and more.
 - **Email integration**: Brevo, Resend, SendGrid, Mailgun, Postmark — including file attachments
 - **Accessibility**: WCAG 2.1 AA compliant patterns throughout
 - **Multi-step forms** with adaptive step routing based on earlier answers
+- **Security by default**: every generated form is production-hardened out of the box
+
+## Security defaults (included in every generated form)
+
+No extra setup required — these are baked into the generated code:
+
+| Protection | What it does |
+|-----------|--------------|
+| `escapeHtml` | Prevents XSS via unsanitized values in HTML email bodies |
+| `sanitizeInput` | Strips CRLF (email header injection), trims + caps field lengths |
+| Email regex validation | Server-side format check beyond just `if (!email)` |
+| Body size guard | Rejects requests > 50 KB before JSON.parse |
+| Honeypot field | Hidden input bots auto-fill; real users never touch it |
+| Submission time guard | Rejects submissions arriving in < 3 seconds (bot speed) |
+| Rate limiter | Max 5 requests / 60s per IP (in-memory; Upstash upgrade path included) |
+| Duplicate detection | Same email blocked for 5 minutes after first submission |
+| Spam keyword filter | Configurable server-side keyword list checked against message field |
+
+**Optional (Q9 in interview):**
+- **reCAPTCHA v3** — invisible CAPTCHA, no checkbox friction, Google score ≥ 0.5 required
 
 ## Triggers
 
@@ -28,19 +48,20 @@ web-forms/
 └── references/
     ├── form-presets.md               # Field definitions per business type
     ├── email-services.md             # Integration code + file attachment support
-    └── accessibility-patterns.md    # WCAG patterns, conditional logic, Typeform-style
+    ├── accessibility-patterns.md    # WCAG patterns, conditional logic, Typeform-style
+    └── security-patterns.md         # Security utilities: escapeHtml, rate limiter, honeypot, reCAPTCHA v3, etc.
 ```
 
 ## Phases
 
 | Phase | Description |
 |-------|-------------|
-| 1 | Interview — 8 questions to shape the form |
+| 1 | Interview — 9 questions to shape the form (incl. reCAPTCHA opt-in) |
 | 2 | Identify stack & output format |
 | 3 | Select field preset + UI patterns (pills, conditional, Typeform-style) |
-| 4 | Build the form component |
-| 5 | API route & email integration (with file attachment support) |
-| 6 | Post-generation checklist |
+| 4 | Build the form component (incl. mandatory security layer) |
+| 5 | API route & email integration — 7-step ordered contract with security first |
+| 6 | Post-generation checklist with security status block |
 | 7 | Multi-step forms (optional) |
 
 ## Changelog

@@ -35,7 +35,7 @@ UI pattern reminder (from SKILL.md Phase 3):
 ### Optional fields
 | Name | Type | Label | Notes |
 |------|------|-------|-------|
-| phone | tel | Phone Number | Add if sales team does calls |
+| phone | tel | Phone Number | Add if sales team does calls — see [field-validation.md](field-validation.md) for `type=tel` + libphonenumber pattern |
 | referral | text / select | How did you hear about us? | Word of mouth / LinkedIn / Search / Event / Other |
 
 ---
@@ -175,6 +175,7 @@ UI pattern reminder (from SKILL.md Phase 3):
 ### Layout
 - Group into sections: Personal Info → Application Details → Supporting Documents
 - File upload: validate type (PDF/DOC) and size (≤5MB) client-side
+- For `phone` (tel), `linkedin` / `portfolio` (url), and `start_date` (date) fields, follow the per-field snippets in [field-validation.md](field-validation.md) — `inputmode` + `autocomplete` + on-blur validation + server-side parse
 - For multiple roles: use a `<select>` pre-populated with open positions
 
 ---

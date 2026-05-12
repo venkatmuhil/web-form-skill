@@ -52,13 +52,14 @@ tone, UI patterns, and email integration. Ask these questions upfront (all at on
 | 2 | Who fills this form? (founder, enterprise buyer, job applicant, student, customer…) | Sets tone and label language |
 | 3 | What's the primary CTA? ("Book a call", "Get a quote", "Apply now", "Send message") | Submit button label + success message copy |
 | 4 | Any specific fields you need beyond the defaults? Or fields to remove? | Customise the preset |
-| 5 | What are your brand colors? (primary accent hex, background hex) | Inject into Tailwind / CSS |
+| 5 | What are your brand colors? (primary accent hex, background hex) — *skip if Phase 2.5 already detected design tokens in the project* | Inject into Tailwind / CSS |
 | 6 | How should submissions be delivered? Pick one or combine: **Brevo · Resend · SendGrid · Mailgun · Postmark** (managed email) · **SMTP/Nodemailer** (own mail server) · **Database** (Postgres/Supabase/Prisma) · **Slack/Discord/Teams webhook** · **Generic webhook** (Zapier/Make/n8n) | Routes to the right integration — see `email-services.md` for all options including no-3rd-party paths |
 | 7 | What email address should receive notifications? *(skip if delivery = DB-only or chat-only)* | `NOTIFY_EMAIL` env var |
 | 8 | What sender name and email should appear on outgoing emails? *(skip if no email path)* | `SENDER_NAME` / `SENDER_EMAIL` env vars |
 | 9 | Do you want invisible CAPTCHA (reCAPTCHA v3) for bot protection? Default: **Yes** for public forms | Adds reCAPTCHA v3 to component + API route |
 | 10 | Which consents do you need? Default: **Privacy/GDPR**. Optionally: marketing opt-in, terms of service, age confirmation, custom. For each, paste the linked policy URL — or ask me to scaffold a placeholder page. | Generates consent checkboxes + server-side `<key>ConsentedAt` timestamps. See `compliance.md`. |
 | 11 | On success: replace the form inline (default) **or** redirect to a thank-you page (e.g. `/thank-you`) — useful for analytics conversion tracking? | Wires `router.push("/thank-you")` instead of the inline success state |
+| 12 | *(only if a date-of-birth field is in the preset)* Minimum age for the DOB field? **13** (COPPA), **16** (GDPR-K), **18** (alcohol/finance), **21** (cannabis), or **none** | Sets the `max=` attribute on `<input type="date">` and the server-side age check — see `references/field-validation.md` |
 
 **Skip questions whose answers are already clear from context.** If the user says
 "add a contact form to my Next.js SaaS with Resend", skip Q1, Q6, and partially Q2.
@@ -87,6 +88,45 @@ After the interview, confirm the plan before generating:
 - **Bootstrap / MUI / Chakra** → use that framework's components
 - **React + no mention** → default to Tailwind (most common pairing)
 - **HTML + no mention** → scoped `<style>` block with CSS custom properties (`--color-accent`)
+
+---
+
+## Phase 2.5 — Design Context Probe
+
+Read `references/design-context.md` and run a **bounded, read-only** probe of
+the project before generating any code. Skip only for standalone HTML files
+with no build step.
+
+**What to look for (stop at the first hit per category):**
+
+1. **Design doc** — `design.md` / `DESIGN.md` / `docs/design.md` / `docs/design-system.md`
+2. **Token sources** — `tailwind.config.{js,ts,mjs,cjs}` (`theme.colors.*`,
+   `borderRadius`, `fontFamily`), then `tokens.json` / `design-tokens.json`,
+   then CSS custom properties in `globals.css` / `app/globals.css` /
+   `styles/globals.css`
+3. **Component primitives** — `components/ui/{button,input,label,textarea}.tsx`
+   (shadcn); `@chakra-ui/react`, `@mui/material`, `react-aria-components` in
+   `package.json`; or custom `components/Form*.tsx`
+4. **Dark mode** — any `dark:` variant or `[data-theme=dark]` selector in the
+   project
+
+**Always output one line before continuing to Phase 3:**
+
+```
+🎨 Design context: [tailwind: primary=#xxx, radius=lg] + [shadcn: Button, Input, Label]
+   — generated form will use these.
+```
+
+Or, if nothing matched: `🎨 Design context: none detected — using brand color from Q5.`
+
+**Effect on later phases:**
+- Phase 1 Q5 (brand colors) is skipped when tokens were detected — the
+  project's design system is the source of truth.
+- Phase 4 substitutes detected tokens for inline hex (`bg-primary` not
+  `bg-[#HEX]`) and imports detected primitives instead of hand-rolling
+  `<input>` / `<button>`.
+- Phase A audits the existing form **against the same probe** — flagging
+  inline-hex / hand-rolled primitives / missing dark mode as P2 findings.
 
 ---
 
@@ -257,9 +297,22 @@ Read `references/accessibility-patterns.md` for complex patterns (file upload, s
 - On submit with errors: focus first invalid field
 
 ### Client-side validation
-- HTML5 first: `required`, `type="email"`, `minlength`, `pattern`
-- JS: live blur feedback, cross-field checks, custom messages
-- Disable submit during loading; re-enable on error
+
+Read `references/field-validation.md` for per-field-type snippets (phone,
+email, URL/links, date of birth) — the same file drives both Greenfield and
+Audit. Core principles applied to every field:
+
+- HTML5 first: `required`, correct `type`, `minlength`, `pattern`, plus
+  `inputmode` and `autocomplete` on every applicable field
+- Validate **on blur**, not on every keystroke; re-validate live only after a
+  field has been blurred once and shown an error
+- Specific, actionable error copy (e.g. "Email must include @") — never just
+  "Invalid"
+- Pair color with icon + text (WCAG 1.4.1) — red border alone is insufficient
+- **Never disable the submit button.** Let the user submit, surface errors,
+  focus the first invalid field
+- Disable submit only while `loading`; re-enable on error
+- Mobile defaults: input font-size ≥ 16px (avoids iOS zoom), tap target ≥ 44 × 44 px
 
 ### Consent layer (Phase 1 Q10 — if any consent was chosen)
 
@@ -310,7 +363,7 @@ Pick one (or combine — e.g. DB + Slack with no email at all):
 0. **Origin check** — read `Origin` header; if `ALLOWED_ORIGINS` is set and the header is not in the comma-separated allow-list, return `403 Forbidden`. Skip in dev (no `ALLOWED_ORIGINS` set).
 1. **Body size guard** — reject raw request body > 50 KB before JSON.parse
 2. **Sanitize inputs** — `sanitizeInput()` on name (100), email (254), message (5000), all text fields
-3. **Validate required fields** — return `400` if name/email missing or email fails regex
+3. **Validate required fields per field type** — return `400` if required fields missing or any typed field fails its server-side check. Email uses the regex in `security-patterns.md`; phone, URL, and DOB each have their own server snippet — see `references/field-validation.md` (phone via `parsePhoneNumberFromString().isValid()` → store E.164; URL via `new URL()` + protocol/hostname allow-list; DOB via UTC `Date.UTC` parse + year/month/day age check)
 4. **Validate required consents** — return `400` if a required consent (Q10) is false; capture `<key>ConsentedAt` timestamps for the truthy ones. See `compliance.md → Phase 5`.
 5. **Bot guards** — all silent `200 { success: true }` on trigger (never tip off bots):
    - Rate limit by IP (in-memory default; **required upgrade to Upstash on serverless**)
@@ -487,9 +540,11 @@ the audit output.
 | Security | `references/security-patterns.md` | `escapeHtml` on all `${value}` in email HTML, `sanitizeInput` on text fields, body size guard (50 KB), honeypot field, submission time guard (3s), rate limiter, duplicate-email guard, spam keyword filter, `ALLOWED_ORIGINS` step-0 check, reCAPTCHA v3 if public |
 | Accessibility | `references/accessibility-patterns.md` | every input has `<label for>` / `aria-label`, radio/checkbox groups wrapped in `<fieldset><legend>`, errors use `role="alert"` or `aria-live`, errors are not color-only, `required` attribute + visual asterisk + page legend, submit button `aria-busy` while loading, visible focus ring (no bare `outline:none`), focus moves to first invalid field on submit |
 | Validation | SKILL.md Phase 4 | HTML5 attrs (`required`, `type=email`, `minlength`, `pattern`), server-side regex + length caps, submit disabled during loading, cross-field rules where relevant |
+| Field-type validation | `references/field-validation.md` | phone uses `type=tel` + `inputmode=tel` + `autocomplete=tel` + `parsePhoneNumberFromString().isValid()` server-side (stored as E.164); URL/link fields use `type=url` + `inputmode=url` + `new URL()` server-side with protocol allow-list (`http`/`https` only); DOB uses `type=date` + `min`/`max` + `autocomplete=bday` + UTC `Date.UTC` parse + year/month/day age check; email has on-blur trim+lowercase, optional typo-suggestion ("Did you mean…"), and `autocapitalize=off` + `spellcheck=false`. Validate **on blur**, never disable the submit button, pair color with icon + text. |
 | Delivery & API contract | `references/email-services.md` + SKILL.md Phase 5 nine-step list | all nine steps present and in order (origin → size → sanitize → validate → consents → bot guards → deliver → CRM upsert if any → log real failures); bot-guard paths return silent `200`; HTML email bodies escape every interpolated value |
 | Compliance | `references/compliance.md` | one checkbox per consent (no bundling), required consents unchecked by default, server records `<key>ConsentedAt` timestamps, policy links `target="_blank" rel="noopener"`, placeholder `/privacy` and `/terms` routes exist if linked |
-| UI / UX polish | `references/accessibility-patterns.md → UI/UX heuristics for form polish` | visual hierarchy, spacing rhythm, inline error placement, ≥ 44px tap targets, `inputmode` + `autocomplete`, brand accent applied to CTA + focus, microcopy, motion respects `prefers-reduced-motion` |
+| UI / UX polish | `references/accessibility-patterns.md → UI/UX heuristics for form polish` + `references/accessibility-patterns.md → Polish Layer (P2 opt-in)` | visual hierarchy, spacing rhythm, inline error placement, ≥ 44px tap targets, `inputmode` + `autocomplete`, brand accent applied to CTA + focus, microcopy, motion respects `prefers-reduced-motion`; opt-in extras: floating labels, character counters, button label morph, error-summary anchor list, dark-mode pass |
+| Design system fit | `references/design-context.md` | inline hex `bg-[#xxx]` when `tailwind.config` defines a token; hand-rolled `<input>` when `components/ui/input.tsx` exists; missing `dark:` variants when the rest of the project ships dark mode; ignored token from `design.md` |
 
 **Severity buckets for the report:**
 - **P0** — security or correctness (XSS, missing sanitization, no rate limit, missing origin check, broken submission)
@@ -547,6 +602,8 @@ state incorrectly), say so explicitly and offer: *"This is closer to a rewrite t
 | `references/form-presets.md` | Phase 3 — always; field definitions per business type |
 | `references/email-services.md` | Phase 5 — managed services (Brevo/Resend/SendGrid/Mailgun/Postmark) **and** no-3rd-party paths (SMTP/Nodemailer, DB persistence, Slack/Discord/Teams, generic webhook); file attachment syntax |
 | `references/accessibility-patterns.md` | Pills, star ratings, file upload, conditional/progressive patterns, Typeform-style, multi-step; **UI/UX polish heuristics** used by Phase A |
+| `references/field-validation.md` | Phase 4 + Phase 5 — per-field-type validation (phone, email + typo suggestions, URL/links, date of birth) with React + plain-HTML snippets and mobile-first UX rules; same source drives Greenfield generation and Audit findings |
+| `references/design-context.md` | Phase 2.5 + Phase A — read-only probe for `design.md`, Tailwind config / CSS tokens, shadcn or other component primitives, dark mode; tells the generator to reuse the project's design system instead of inlining hex / hand-rolling primitives |
 | `references/security-patterns.md` | Phase 4 + Phase 5 — always; all security utilities (escapeHtml, sanitizeInput, rate limiter, honeypot, time guard, duplicate detection, spam filter, reCAPTCHA v3, origin guard) |
 | `references/compliance.md` | Phase 1 Q10 + Phase 4 (consent UI) + Phase 5 (consent timestamping) + Phase 8 (data retention, IP hashing, RTBF) |
 | `references/deployment.md` | Phase 8 only — never during generation. Platform env vars, DNS verification (SPF/DKIM/DMARC), production smoke test, serverless rate-limit upgrade, monitoring |

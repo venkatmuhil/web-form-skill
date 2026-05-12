@@ -744,3 +744,56 @@ function QuestionInput({ q, value, onChange }: {
 | Robust | Semantic HTML, ARIA only to enhance (not replace) |
 
 Test with: keyboard-only navigation, VoiceOver (Mac), NVDA (Windows), or axe DevTools browser extension.
+
+---
+
+## UI/UX heuristics for form polish
+
+Used by the audit mode (SKILL.md Phase A) as the P2 rubric, and by Phase 4 of generation
+as a final pass over the produced component. These are heuristics, not WCAG rules — they
+turn a correct form into a *good* form.
+
+### Visual hierarchy
+- One clear H1 above the form (the form's purpose, not the page's nav title)
+- Labels: consistent weight (medium/600), one size, never all-caps unless brand-systemic
+- Input text **≥ 16px** on mobile — anything smaller triggers iOS zoom-on-focus
+- Helper text smaller than label, muted gray, sits **between** label and input or directly below input — never floating to the right
+
+### Spacing rhythm
+- 16–24px vertical gap between fields
+- 6–8px between label and its input
+- 12–16px between input and inline error/helper
+- Submit button sits **24–32px** below the last field, never glued to it
+
+### Error UX
+- Inline, directly below the offending field — never only in a banner
+- Red text **plus** an icon or "Error:" prefix (color-only fails WCAG 1.4.1)
+- Error persists until the user corrects the field, not until next keystroke
+- On submit-with-errors: scroll the first invalid field into view AND focus it
+
+### Mobile
+- Tap targets **≥ 44×44px** (Apple HIG) — applies to checkboxes, radio pills, submit
+- Inputs full-width on viewports < 640px
+- Set `inputmode` (`email`, `tel`, `numeric`, `decimal`) and `autocomplete` (`email`, `name`, `tel`, `organization`, `street-address`, etc.) on every applicable field — saves the user 5–15 seconds and reduces typos
+- `enterkeyhint="next"` on intermediate fields, `enterkeyhint="send"` on the last one
+
+### Brand application
+- **One** accent color: primary CTA background, focus ring, active pill toggle, progress bar
+- Neutral grays for all chrome (borders, labels, helper text, disabled states)
+- Hover/focus states must shift by at least ~10% luminance — not just an opacity change
+- Avoid two competing accents; secondary actions are ghost buttons or text links
+
+### Microcopy
+- CTA: verb + noun ("Send message", "Book a call", "Request quote") — never just "Submit"
+- Placeholders are **examples**, not labels (`e.g. acme.com`, not `Company`)
+- Success state copy mirrors the CTA's promise ("We'll be in touch within 1 business day"), not generic "Thanks!"
+- Error messages name the fix, not the violation ("Enter a valid email like name@company.com", not "Invalid format")
+
+### Motion
+- Subtle 150–250ms ease-out on focus, hover, and conditional reveals
+- Stagger only in Typeform-style mode (one question at a time); never on a single-page form
+- Wrap all transitions in `@media (prefers-reduced-motion: reduce) { * { transition: none !important } }` — required for vestibular safety
+
+### Audit shortcut
+
+When auditing an existing form, check these heuristics in this order: hierarchy → spacing → error UX → mobile attrs → brand color usage → microcopy → motion. The first three account for ~80% of "this form feels off" P2 findings.

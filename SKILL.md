@@ -7,6 +7,10 @@ description: >
   application form", "collect requirements", "add an inquiry form", or any variation of wanting
   form UI on a website. Also triggers for "integrate Brevo", "integrate Resend", "integrate SendGrid",
   "send form emails", "form submission webhook", "form validation", or "contact page".
+  ALSO triggers in Audit Mode when the user wants to inspect or improve a form they already have:
+  "review my form", "audit my contact form", "edit existing form", "improve this form",
+  "is my form accessible?", "check my form code", "form code review", "make my form look better",
+  "fix form UX", "improve form UI", or any variation pointing at an existing form file.
   Covers full stack: structured user interview, UI generation, business-type field presets,
   pill/toggle multi-select UI, client-side validation, WCAG accessibility, submission delivery
   (managed email — Brevo, Resend, SendGrid, Mailgun, Postmark — or no-3rd-party paths: SMTP/Nodemailer,
@@ -19,6 +23,21 @@ description: >
 
 Build polished, accessible, production-ready web forms — starting with a structured interview,
 ending with working code and a deployment checklist.
+
+---
+
+## Phase 0 — Intent Triage
+
+**Decide which mode to run before doing anything else.** Two modes share the same rubrics and reference files:
+
+| Mode | Trigger signals | Where to go |
+|------|-----------------|-------------|
+| **Greenfield** (new form) | "create / build / add / make / set up" + form noun; no existing file referenced | Continue to **Phase 1 — Interview** |
+| **Audit & Improve** (existing form) | A file path is mentioned, code is pasted, or the verb is "review / audit / edit / improve / check / fix / polish / refactor" + form noun; phrases like "existing", "already have", "current form", "my contact page" | Jump to **Phase A — Audit & Improve** (below). Skip Phase 1 entirely. |
+
+Ambiguous? Ask one short question: *"Are we building a new form or improving one you already have? If existing, share the file path."* Do not start the new-form interview on an audit request — it is the wrong shape and will frustrate the user.
+
+Greenfield is the default. Audit Mode never runs unless triggered by the signals above.
 
 ---
 
@@ -438,13 +457,96 @@ Stop and confirm with the user at the end of each step. The Deploy phase typical
 
 ---
 
+## Phase A — Audit & Improve (existing form)
+
+**Activation:** entered from Phase 0 when the user wants to review, edit, or improve a form
+that already exists. Replaces Phases 1–5 for this run. Phases 6–8 (verification, deploy)
+may still run after fixes are applied.
+
+The same reference files that drive generation drive the audit — there is no separate
+rubric document. Standards stay in lockstep across both modes.
+
+### A.1 — Locate the form
+
+Ask for paths if not given. Read all relevant files with `Read`:
+- Form component (`*.tsx` / `*.jsx` / `*.vue` / `*.html`)
+- API route (`route.ts` / `[name].ts` / server handler)
+- Env example (`.env.example`) and any config touching delivery
+
+Do not guess — if the user only gave one file but the framework implies a counterpart
+(Next.js page without route, or vice versa), ask before assuming it's missing.
+
+### A.2 — Run the checklist audit
+
+For each category, mark **✅ pass** / **⚠️ partial** / **❌ missing** with `file:line`
+evidence. Reuse the existing reference files as the rubric — never duplicate rules into
+the audit output.
+
+| Category | Rubric source | Required spot-checks |
+|----------|---------------|----------------------|
+| Security | `references/security-patterns.md` | `escapeHtml` on all `${value}` in email HTML, `sanitizeInput` on text fields, body size guard (50 KB), honeypot field, submission time guard (3s), rate limiter, duplicate-email guard, spam keyword filter, `ALLOWED_ORIGINS` step-0 check, reCAPTCHA v3 if public |
+| Accessibility | `references/accessibility-patterns.md` | every input has `<label for>` / `aria-label`, radio/checkbox groups wrapped in `<fieldset><legend>`, errors use `role="alert"` or `aria-live`, errors are not color-only, `required` attribute + visual asterisk + page legend, submit button `aria-busy` while loading, visible focus ring (no bare `outline:none`), focus moves to first invalid field on submit |
+| Validation | SKILL.md Phase 4 | HTML5 attrs (`required`, `type=email`, `minlength`, `pattern`), server-side regex + length caps, submit disabled during loading, cross-field rules where relevant |
+| Delivery & API contract | `references/email-services.md` + SKILL.md Phase 5 nine-step list | all nine steps present and in order (origin → size → sanitize → validate → consents → bot guards → deliver → CRM upsert if any → log real failures); bot-guard paths return silent `200`; HTML email bodies escape every interpolated value |
+| Compliance | `references/compliance.md` | one checkbox per consent (no bundling), required consents unchecked by default, server records `<key>ConsentedAt` timestamps, policy links `target="_blank" rel="noopener"`, placeholder `/privacy` and `/terms` routes exist if linked |
+| UI / UX polish | `references/accessibility-patterns.md → UI/UX heuristics for form polish` | visual hierarchy, spacing rhythm, inline error placement, ≥ 44px tap targets, `inputmode` + `autocomplete`, brand accent applied to CTA + focus, microcopy, motion respects `prefers-reduced-motion` |
+
+**Severity buckets for the report:**
+- **P0** — security or correctness (XSS, missing sanitization, no rate limit, missing origin check, broken submission)
+- **P1** — accessibility violations (WCAG 2.1 AA) and required-consent gaps
+- **P2** — UI/UX polish (spacing, hierarchy, tap targets, microcopy)
+- **P3** — nice-to-have (motion, advanced patterns, conversational mode)
+
+**Output format:** a single Markdown table of findings, each row with category, severity,
+file:line, what's wrong, and the one-line fix. End with a one-line summary:
+`Found X P0, Y P1, Z P2, W P3 issues.`
+
+### A.3 — Present findings, ask before fixing
+
+Do **not** edit anything until the user picks a scope. Offer:
+
+1. **Fix P0 + P1** (security + a11y + correctness) — the safe, high-value default
+2. **Fix everything** including UI/UX polish
+3. **Fix specific items** — user names rows from the report
+4. **Just leave me the report** — no edits
+
+This gating mirrors the Deploy phase: the audit is cheap, the fix is not.
+
+### A.4 — Apply fixes
+
+When the user confirms, use `Edit` on their existing files. Rules:
+
+- **Preserve their stack** — do not swap Tailwind for CSS-in-JS, do not move from Pages to
+  App Router, do not rename their variables.
+- **Reuse the generator's snippets verbatim** — pull from `security-patterns.md`,
+  `accessibility-patterns.md`, `compliance.md`. The audit fix and a freshly-generated
+  form should produce byte-identical security utilities.
+- **Smallest diff that satisfies the rule** — do not "improve while you're in there".
+  Each edit traces back to one numbered finding from A.2.
+- **Group related edits** — all security fixes in one pass, all a11y fixes in another,
+  so the diff stays reviewable.
+
+After edits, output:
+- A short diff summary (file → list of finding IDs fixed)
+- The same `🧪 Test locally` block from Phase 6 (adapted to the user's framework)
+- Offer Phase 8 (Deploy) only if the user explicitly asks
+
+### A.5 — When to fall back to greenfield
+
+If the audit finds the existing form is so far from the rubric that patching is more work
+than rewriting (e.g. no API route at all, wrong framework version, mixes server and client
+state incorrectly), say so explicitly and offer: *"This is closer to a rewrite than a fix
+— want me to run the Phase 1 interview and regenerate cleanly?"* Let the user decide.
+
+---
+
 ## Reference Files
 
 | File | When to read |
 |------|--------------|
 | `references/form-presets.md` | Phase 3 — always; field definitions per business type |
 | `references/email-services.md` | Phase 5 — managed services (Brevo/Resend/SendGrid/Mailgun/Postmark) **and** no-3rd-party paths (SMTP/Nodemailer, DB persistence, Slack/Discord/Teams, generic webhook); file attachment syntax |
-| `references/accessibility-patterns.md` | Pills, star ratings, file upload, conditional/progressive patterns, Typeform-style, multi-step |
+| `references/accessibility-patterns.md` | Pills, star ratings, file upload, conditional/progressive patterns, Typeform-style, multi-step; **UI/UX polish heuristics** used by Phase A |
 | `references/security-patterns.md` | Phase 4 + Phase 5 — always; all security utilities (escapeHtml, sanitizeInput, rate limiter, honeypot, time guard, duplicate detection, spam filter, reCAPTCHA v3, origin guard) |
 | `references/compliance.md` | Phase 1 Q10 + Phase 4 (consent UI) + Phase 5 (consent timestamping) + Phase 8 (data retention, IP hashing, RTBF) |
 | `references/deployment.md` | Phase 8 only — never during generation. Platform env vars, DNS verification (SPF/DKIM/DMARC), production smoke test, serverless rate-limit upgrade, monitoring |

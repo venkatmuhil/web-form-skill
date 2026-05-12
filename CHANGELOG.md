@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.3.0] — 2026-05-12
+
+### Added — Audit & Improve mode (existing forms)
+
+The skill now handles two intents through a single entry point:
+
+- **Phase 0 — Intent Triage** (new section at top of `SKILL.md`): routes the request to **Build** (greenfield, Phases 1–8, unchanged) or **Audit & Improve** (existing form, new Phase A). Triage signals: a referenced file path, pasted code, or verbs like *review / audit / edit / improve / check / fix / polish*.
+- **Phase A — Audit & Improve** (new section in `SKILL.md`):
+  - A.1 locate files (component + API route + env example)
+  - A.2 run the checklist audit against the **existing** reference rubrics — security (`security-patterns.md`), a11y (`accessibility-patterns.md`), validation (Phase 4), API contract (Phase 5 9-step list), compliance (`compliance.md`), UI/UX polish (new heuristics section)
+  - Findings reported as a Markdown table with **P0 / P1 / P2 / P3 severity** and `file:line` evidence
+  - A.3 gated confirmation — user picks fix scope; no edits without approval
+  - A.4 apply fixes that reuse the generator's snippets verbatim, smallest diff possible
+  - A.5 fallback to greenfield rewrite when the existing form is too far gone to patch
+- **`references/accessibility-patterns.md` → UI/UX heuristics for form polish** (new section): visual hierarchy, spacing rhythm, error UX, mobile (`inputmode`/`autocomplete`/tap targets), brand application, microcopy, motion (`prefers-reduced-motion`). Drives the P2 bucket in audits and the final pass in generation.
+- **Trigger expansion** in `SKILL.md` frontmatter `description` and `README.md` Triggers list: phrases like *"review my form", "improve this form", "audit my contact form", "edit existing form", "is my form accessible?", "fix form UX"*.
+
+### Changed
+- `README.md` now leads with a **Two modes** table (Build vs. Audit & Improve) so the dual purpose is visible before the feature list.
+- Reference Files table in `SKILL.md` notes that `accessibility-patterns.md` also powers Phase A's UI/UX rubric.
+
+### Design notes
+- **No new rubric file.** The audit reuses every existing reference file as its source of truth, so the generator and the audit stay in lockstep as standards evolve. Only genuinely new content is the UI/UX polish heuristics, which both modes use.
+- **Same gating model as Deploy** (Phase 8): the audit is free, edits require explicit user confirmation.
+
+---
+
 ## [1.2.0] — 2026-05-12
 
 ### Added

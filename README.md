@@ -3,6 +3,15 @@
 A Claude skill for building production-ready web forms — contact forms, lead capture,
 job applications, surveys, requirements gathering, and more.
 
+## Two modes
+
+| Mode | When | What it does |
+|------|------|--------------|
+| **Build** (greenfield) | "Create a contact form for my SaaS" | Runs the 11-question interview, generates the component + API route, lists env vars, hands off a local-test checklist. |
+| **Audit & Improve** (existing form) | "Review my form at `src/app/contact/page.tsx`" / "Improve the UX of this form" / "Is my form accessible?" | Reads your existing files, scores them against the same security / a11y / UX rubrics the generator enforces, returns a prioritized report (P0–P3 with file:line evidence), then applies the fixes you approve. |
+
+Both modes share the same reference files, so a generated form and an audited form converge on the same standards.
+
 ## What it does
 
 - **Structured interview** before generating any code
@@ -43,16 +52,23 @@ No extra setup required — these are baked into the generated code:
 ## Triggers
 
 Use this skill when asked to:
+
+**Build:**
 - "Create a form", "build a contact page", "add a lead capture", "make a survey"
 - "Set up a job application form", "collect requirements", "add an inquiry form"
 - "Integrate Brevo / Resend / SendGrid", "send form emails", "form submission webhook"
 - Build a "Typeform-style", "conversational", or "one question at a time" form
 
+**Audit & Improve:**
+- "Review my form", "audit my contact form", "edit existing form", "improve this form"
+- "Is my form accessible?", "check my form code", "form code review"
+- "Make my form look better", "fix the UX on this form", "polish this form"
+
 ## Structure
 
 ```
 web-forms/
-├── SKILL.md                          # Main skill instructions (8 phases)
+├── SKILL.md                          # Main skill: Phase 0 triage → Build (1–8) or Audit (A)
 └── references/
     ├── form-presets.md               # Field definitions per business type
     ├── email-services.md             # Managed services + no-3rd-party paths (SMTP, DB, chat webhooks); attachments

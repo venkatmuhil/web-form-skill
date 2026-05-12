@@ -1,15 +1,6 @@
 ---
 name: web-forms
-description: >
-  Build or audit production-ready web forms — contact, lead capture, job application,
-  requirements gathering, survey, feedback. Triggers on "create / build / add / make a form",
-  "contact page", "lead capture", "survey", "job application", "form validation",
-  "send form emails", "integrate Brevo / Resend / SendGrid / Mailgun / Postmark", "form webhook".
-  Also triggers in audit mode: "review / audit / edit / improve / fix my form", "form code review",
-  "make my form accessible", "is my form secure". Covers interview, UI generation, presets, pill /
-  toggle multi-select, validation, WCAG accessibility, delivery (managed email, SMTP, DB, chat /
-  generic webhook), consent + privacy compliance, and a separate user-initiated deploy phase.
-  Always use this skill before generating any form-related code.
+description: Create, review, or improve production-ready web forms — fields, validation, WCAG accessibility, consent, and delivery to email, database, chat, or webhook.
 ---
 
 # Web Forms Skill

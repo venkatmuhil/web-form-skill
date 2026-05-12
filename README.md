@@ -7,7 +7,7 @@ job applications, surveys, requirements gathering, and more.
 
 | Mode | When | What it does |
 |------|------|--------------|
-| **Build** (greenfield) | "Create a contact form for my SaaS" | Runs the 11-question interview, generates the component + API route, lists env vars, hands off a local-test checklist. |
+| **Build** (greenfield) | "Create a contact form for my SaaS" | Runs the 12-question interview, generates the component + API route, lists env vars, hands off a local-test checklist. |
 | **Audit & Improve** (existing form) | "Review my form at `src/app/contact/page.tsx`" / "Improve the UX of this form" / "Is my form accessible?" | Reads your existing files, scores them against the same security / a11y / UX rubrics the generator enforces, returns a prioritized report (P0–P3 with file:line evidence), then applies the fixes you approve. |
 
 Both modes share the same reference files, so a generated form and an audited form converge on the same standards.
@@ -73,13 +73,17 @@ web-form-skill/                       # repo root (also the plugin root)
 │   └── marketplace.json              # Marketplace catalog (1 plugin)
 ├── skills/
 │   └── web-forms/
-│       ├── SKILL.md                  # Main skill: Phase 0 triage → Build (1–8) or Audit (A)
+│       ├── SKILL.md                  # Main skill: Phase 1 triage → Build (2–10) or Audit (11)
 │       └── references/
 │           ├── form-presets.md       # Field definitions per business type
-│           ├── email-services.md     # Managed services + no-3rd-party paths (SMTP, DB, chat webhooks); attachments
-│           ├── accessibility-patterns.md  # WCAG patterns, conditional logic, Typeform-style
+│           ├── design-context.md     # Read-only probe for design tokens / primitives / dark mode
+│           ├── accessibility-patterns.md  # WCAG patterns, pill toggles, component shell, conditional, Typeform-style, polish layer
+│           ├── field-validation.md   # Per-type validation: phone, email, URL, date of birth
 │           ├── security-patterns.md  # escapeHtml, rate limiter, honeypot, reCAPTCHA v3, origin guard
 │           ├── compliance.md         # Consent checkboxes, policy-link scaffolding, data retention, IP hashing, RTBF
+│           ├── api-contract.md       # 9-step API contract + delivery quick-pick + env vars
+│           ├── email-services.md     # Managed services + no-3rd-party paths (SMTP, DB, chat webhooks); attachments
+│           ├── audit-rubric.md       # Phase 11 audit categories + P0–P3 severity buckets
 │           └── deployment.md         # User-initiated Deploy phase: platform env vars, DNS verification, smoke tests
 ├── README.md
 └── CHANGELOG.md
@@ -89,14 +93,17 @@ web-form-skill/                       # repo root (also the plugin root)
 
 | Phase | Description |
 |-------|-------------|
-| 1 | Interview — 11 questions to shape the form (delivery method, reCAPTCHA, consents, success UX) |
-| 2 | Identify stack & output format |
-| 3 | Select field preset + UI patterns (pills, conditional, Typeform-style) |
-| 4 | Build the form component (consent layer + mandatory security layer) |
-| 5 | API route & submission delivery — 8-step ordered contract (origin → size → sanitize → validate → consent → bot guards → deliver → log) |
-| 6 | Post-generation & **local verification only** — no deployment steps |
-| 7 | Multi-step forms (optional) |
-| 8 | **Deploy — user-initiated only.** Walks platform env vars, SPF/DKIM/DMARC verification, production smoke test, Lighthouse/axe a11y pass, monitoring. Runs strictly after local tests pass and the user says "deploy". |
+| 1  | Triage — Greenfield vs. Audit & Improve |
+| 2  | Interview — 12 questions to shape the form (delivery, reCAPTCHA, consents, success UX, DOB age) |
+| 3  | Identify stack, output format, and default styling |
+| 4  | Design-context probe — detect tokens, primitives, and dark mode before generating |
+| 5  | Select field preset + UI patterns (pills, conditional, Typeform-style) |
+| 6  | Build the form component (a11y, validation, consent layer, mandatory security layer) |
+| 7  | API route & submission delivery — 9-step ordered contract (origin → size → sanitize → validate → consents → bot guards → deliver → CRM upsert → log) |
+| 8  | Post-generation & **local verification only** — no deployment steps |
+| 9  | Multi-step forms (optional) |
+| 10 | **Deploy — user-initiated only.** Walks platform env vars, SPF/DKIM/DMARC verification, production smoke test, Lighthouse/axe a11y pass, monitoring. Runs strictly after local tests pass and the user says "deploy". |
+| 11 | **Audit & Improve.** Locate the form, walk the audit rubric, return a P0–P3 findings table with `file:line` evidence, then apply only the fixes the user approves. |
 
 ## Changelog
 

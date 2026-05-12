@@ -6,6 +6,36 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.6.0] — 2026-05-12
+
+### Changed — `SKILL.md` rewrite (editorial; no behaviour change)
+
+Trimmed `SKILL.md` from **609 → 359 lines** by removing duplication and
+moving inline code snippets into the reference files. The skill's flows,
+outputs, and triggers are unchanged.
+
+- **Phases renumbered to a flat `1–11`** (was `0 / 1 / 2 / 2.5 / 3 / 4 / 5 / 6 / 7 / 8 / A`). The `0`, `2.5`, and `A` outliers are gone; Audit is now Phase 11.
+- **Frontmatter description** tightened from ~18 lines to ~10 while preserving every trigger phrase.
+- **Pill-toggle React snippet** moved out of `SKILL.md` into `references/accessibility-patterns.md → Pill toggles`.
+- **Component shell** (the 50-line React starter) moved into `references/accessibility-patterns.md → Component shell`.
+- **Broken UI-pattern table** (a stray row with no header, left from a prior edit) repaired.
+- **Reference table** at the bottom of `SKILL.md` collapsed from 8 rows of prose into a 2-column `file | when to read`.
+- **Local-verification output block** kept (it's the template Claude prints), but per-line commentary like `← Brevo only` collapsed into one *"omit lines that don't apply"* instruction above it.
+
+### Added — Two new reference files (single sources of truth)
+
+- **`references/api-contract.md`** — the nine-step API contract (origin → size → sanitize → validate → consents → bot guards → deliver → CRM upsert → log), the delivery quick-pick table, and the full env-var table. Phase 7 (build) and Phase 11 (audit) both point at this file, eliminating the duplication that previously had the nine steps written out twice.
+- **`references/audit-rubric.md`** — the Phase 11 category × rubric-source × spot-checks table plus the P0–P3 severity-bucket definitions. Audit findings still trace back to the same rubric files used during generation, but the index now lives in one place.
+
+### Unchanged
+
+`form-presets.md`, `email-services.md`, `field-validation.md`,
+`design-context.md`, `security-patterns.md`, `compliance.md`,
+`deployment.md`, `.claude-plugin/*`. The skill's behaviour, generated
+files, and trigger surface are byte-equivalent to 1.5.0.
+
+---
+
 ## [1.5.0] — 2026-05-12
 
 ### Added — Design context probe (Phase 2.5)

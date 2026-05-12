@@ -908,3 +908,102 @@ On multi-field forms, `Enter` in any text input submits — that's the default a
 When the user agrees to the polish layer, apply items independently — don't
 treat it as all-or-nothing. Items 1, 3, and 7 give the biggest "feels
 premium" lift per line of code.
+
+---
+
+## Pill toggles (multi-select)
+
+Use for 4+ predefined options. Replace `#ACCENT` with the brand color
+from the interview (or the detected design token from Phase 4).
+
+```tsx
+const OPTIONS = ['Strategy', 'Design', 'Development', 'Marketing'];
+const [selected, setSelected] = useState<string[]>([]);
+
+const toggle = (item: string) =>
+  setSelected(prev =>
+    prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]
+  );
+
+<div role="group" aria-labelledby="services-label">
+  <p id="services-label" className="font-medium mb-2">Services *</p>
+  <div className="flex flex-wrap gap-2">
+    {OPTIONS.map(opt => (
+      <button
+        key={opt} type="button"
+        onClick={() => toggle(opt)}
+        aria-pressed={selected.includes(opt)}
+        className={`px-4 py-2 rounded-full border text-sm font-medium transition-colors
+          ${selected.includes(opt)
+            ? 'bg-[#ACCENT] text-white border-[#ACCENT]'
+            : 'bg-white text-gray-700 border-gray-300 hover:border-[#ACCENT]'}`}
+      >
+        {opt}
+      </button>
+    ))}
+  </div>
+</div>
+```
+
+For single-select (2–3 mutually exclusive options), use the same pattern
+with a single `selected` string and `aria-pressed` true on the chosen pill.
+
+---
+
+## Component shell
+
+The standard React shell every generated form starts from. Replace the
+typed fields and the success-state copy with values from the interview.
+For redirect-on-success (Phase 2 Q11 = thank-you page), call
+`useRouter().push("/thank-you")` in the try block instead of
+`setSubmitted(true)`.
+
+```tsx
+"use client";
+import { useState } from "react";
+
+type FormData = { /* typed fields per preset */ };
+const INITIAL: FormData = { /* defaults */ };
+
+export default function ContactForm() {
+  const [form, setForm]       = useState<FormData>(INITIAL);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Something went wrong");
+      setSubmitted(true);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (submitted) return (
+    <div role="status" aria-live="polite" className="text-center py-16">
+      <h2 className="text-2xl font-bold mb-2">You're all set!</h2>
+      <p className="text-gray-600">/* CTA-specific copy from interview */</p>
+    </div>
+  );
+
+  return (
+    <form onSubmit={handleSubmit} noValidate>
+      {error && <p role="alert" className="text-red-600 mb-4">{error}</p>}
+      {/* fields */}
+      <button type="submit" disabled={loading} aria-busy={loading}>
+        {loading ? "Sending…" : "/* CTA label from interview */"}
+      </button>
+    </form>
+  );
+}
+```

@@ -599,11 +599,377 @@ export async function POST(req: NextRequest) {
 
 ---
 
-## No Email / Webhook Only
+## No 3rd-Party Email Service
 
-Use when the user wants to POST to their own backend, a Zapier webhook, Make (Integromat), etc.
+Three production-ready handlers when the user does not want to depend on Brevo / Resend / SendGrid / Mailgun / Postmark. Each one slots into the same Phase 5 API-route security contract — only the **delivery step** changes.
 
-### Client-side (works with any stack)
+Pick one (or combine — DB + Slack is a common pairing for "no email at all"):
+
+| Option | When it fits | Runs on serverless? |
+|--------|--------------|---------------------|
+| SMTP / Nodemailer | Has own mail server, Google Workspace, Microsoft 365 SMTP, or any SMTP relay | Yes (use a relay, not local sendmail) |
+| Database persistence | Wants every submission stored, queried, exported | Yes (with a hosted DB) |
+| Slack / Discord / Teams webhook | Team lives in chat; no inbox needed | Yes |
+| Generic outbound webhook | Forwarding to Zapier / Make / n8n / own backend | Yes |
+
+The original generic-webhook stub is at the bottom of this section.
+
+---
+
+### Option 1 — SMTP via Nodemailer
+
+For users with their own mail server, Google Workspace, Microsoft 365, Amazon SES SMTP, or any SMTP relay. No 3rd-party SDK required.
+
+#### Install
+```bash
+npm install nodemailer
+npm install --save-dev @types/nodemailer
+```
+
+#### Transport — `utils/mailer.ts` (singleton, reused across requests)
+```ts
+import nodemailer from "nodemailer";
+
+declare global { var __mailer: nodemailer.Transporter | undefined; }
+
+export const mailer =
+  global.__mailer ??
+  nodemailer.createTransport({
+    host:   process.env.SMTP_HOST,
+    port:   Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === "true",   // true for 465, false for 587/STARTTLS
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    pool: true,           // reuse TCP connections
+    maxConnections: 3,
+    maxMessages: 100,
+  });
+
+if (process.env.NODE_ENV !== "production") global.__mailer = mailer;
+```
+
+#### Next.js API route
+```ts
+import { NextRequest, NextResponse } from "next/server";
+import { mailer }         from "@/utils/mailer";
+import { sanitizeInput }  from "@/utils/sanitizeInput";
+import { escapeHtml }     from "@/utils/escapeHtml";
+import { checkRateLimit } from "@/utils/rateLimiter";
+import { isDuplicate }    from "@/utils/duplicateGuard";
+import { isSpam }         from "@/utils/spamFilter";
+
+export async function POST(req: NextRequest) {
+  const raw = await req.text();
+  if (raw.length > 50_000) return NextResponse.json({ error: "Request too large." }, { status: 413 });
+  const body = JSON.parse(raw);
+
+  const name    = sanitizeInput(body.name,    100);
+  const email   = sanitizeInput(body.email,   254);
+  const message = sanitizeInput(body.message, 5000);
+
+  if (!name || !email) return NextResponse.json({ error: "Required fields missing." }, { status: 400 });
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if (!EMAIL_RE.test(email)) return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
+
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  if (!checkRateLimit(ip))                                 return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  if (body.website)                                        return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)  return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                  return NextResponse.json({ success: true });
+  if (isSpam(message))                                     return NextResponse.json({ success: true });
+
+  try {
+    // Notify team
+    await mailer.sendMail({
+      from:    `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
+      to:      process.env.NOTIFY_EMAIL,
+      replyTo: email,
+      subject: `New submission from ${sanitizeInput(name, 100)}`,
+      html: `
+        <h2>New form submission</h2>
+        <p><strong>Name:</strong> ${escapeHtml(name)}</p>
+        <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+        <p><strong>Message:</strong><br/>${escapeHtml(message).replace(/\n/g, "<br/>")}</p>
+      `,
+    });
+
+    // Confirm submitter
+    await mailer.sendMail({
+      from:    `"${process.env.SENDER_NAME}" <${process.env.SENDER_EMAIL}>`,
+      to:      email,
+      subject: "We received your message!",
+      html:    `<p>Hi ${escapeHtml(name)},</p><p>Thanks for reaching out — we'll be in touch shortly.</p>`,
+    });
+  } catch (err) {
+    console.error("[smtp] send failed:", err);
+    return NextResponse.json({ error: "Could not send. Try again." }, { status: 502 });
+  }
+
+  return NextResponse.json({ success: true });
+}
+```
+
+#### Env vars
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false            # true for 465, false for 587/STARTTLS
+SMTP_USER=postmaster@yourdomain.com
+SMTP_PASS=app-password-here
+SENDER_NAME="Your Company"
+SENDER_EMAIL=hello@yourdomain.com
+NOTIFY_EMAIL=team@yourdomain.com
+```
+
+#### Setup notes
+- **Google Workspace**: `smtp.gmail.com:587`, generate an App Password (Account → Security → 2-Step Verification → App passwords). Regular passwords are rejected.
+- **Microsoft 365**: `smtp.office365.com:587`, STARTTLS, account must have SMTP AUTH enabled in Exchange admin.
+- **Amazon SES**: `email-smtp.<region>.amazonaws.com:587`, generate SMTP credentials separately from IAM keys.
+- **Connection pooling** (`pool: true`) is critical on long-running Node hosts. On serverless (Vercel/Netlify Functions) each invocation is a cold transport — that's fine, just slower per send.
+- **Deliverability**: SPF + DKIM + DMARC on the sending domain are mandatory. Without them, expect inbox-spam-folder. See [deployment.md → DNS verification](deployment.md).
+
+---
+
+### Option 2 — Database persistence
+
+Store every submission row in a database. Optionally also send a notification (combine with another option). Works on any stack where the API route can reach the DB.
+
+#### Schema (shared shape — adapt to your engine)
+```
+submissions
+  id          uuid primary key default gen_random_uuid()
+  created_at  timestamptz not null default now()
+  ip_hash     text not null
+  name        text not null
+  email       text not null
+  message     text
+  payload     jsonb not null     -- entire sanitized form for forward-compat
+  status      text not null default 'received'
+  index on created_at desc
+  index on email
+```
+
+`ip_hash` is `sha256(ip + IP_SALT)` — store a salted hash, never the raw IP, to keep the table GDPR-friendly. See [compliance.md](compliance.md).
+
+#### Option 2a — Prisma
+
+`prisma/schema.prisma`:
+```prisma
+model Submission {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  ipHash    String
+  name      String
+  email     String
+  message   String?
+  payload   Json
+  status    String   @default("received")
+
+  @@index([createdAt(sort: Desc)])
+  @@index([email])
+}
+```
+
+`utils/db.ts`:
+```ts
+import { PrismaClient } from "@prisma/client";
+declare global { var __prisma: PrismaClient | undefined; }
+export const prisma = global.__prisma ?? new PrismaClient();
+if (process.env.NODE_ENV !== "production") global.__prisma = prisma;
+```
+
+API route delivery step (replaces the email send):
+```ts
+import { prisma } from "@/utils/db";
+import { createHash } from "crypto";
+
+const ipHash = createHash("sha256").update(ip + process.env.IP_SALT).digest("hex");
+
+try {
+  await prisma.submission.create({
+    data: { ipHash, name, email, message, payload: body },
+  });
+} catch (err) {
+  console.error("[db] write failed:", err);
+  return NextResponse.json({ error: "Could not save. Try again." }, { status: 502 });
+}
+```
+
+#### Option 2b — Supabase (no Prisma)
+
+```ts
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,   // server-only key — never NEXT_PUBLIC_*
+);
+
+const { error } = await supabase.from("submissions").insert({
+  ip_hash: ipHash, name, email, message, payload: body,
+});
+if (error) {
+  console.error("[supabase] insert failed:", error);
+  return NextResponse.json({ error: "Could not save. Try again." }, { status: 502 });
+}
+```
+
+#### Option 2c — Raw Postgres (`pg`)
+```ts
+import { Pool } from "pg";
+declare global { var __pgPool: Pool | undefined; }
+const pool = global.__pgPool ?? new Pool({ connectionString: process.env.DATABASE_URL });
+if (process.env.NODE_ENV !== "production") global.__pgPool = pool;
+
+await pool.query(
+  `INSERT INTO submissions (ip_hash, name, email, message, payload)
+   VALUES ($1, $2, $3, $4, $5)`,
+  [ipHash, name, email, message, body],
+);
+```
+
+#### Env vars
+```
+DATABASE_URL=postgres://user:pass@host:5432/dbname
+IP_SALT=<random 32-byte hex string>
+# Supabase only:
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+```
+
+#### Setup notes
+- **SQLite** works fine for self-hosted single-instance — set `DATABASE_URL="file:./data.db"`. Does **not** work on serverless or read-only filesystems.
+- **Connection limits**: serverless functions can exhaust DB connection pools fast. Use a pooler (Supabase Pooler, Neon, PgBouncer, Prisma Data Proxy).
+- **Retention**: add a scheduled job to purge old rows — see [compliance.md → Data retention](compliance.md).
+- **Indexing**: the `(created_at desc)` index keeps the admin list view fast; the `email` index makes duplicate-checks cheap if you later move that guard to the DB.
+
+---
+
+### Option 3 — Slack / Discord / Teams webhook
+
+No email at all — submissions ping a chat channel. Best for small teams, internal forms, or as a backup channel paired with Option 1 or 2.
+
+#### Slack — incoming webhook (Block Kit)
+```ts
+async function notifySlack(name: string, email: string, message: string) {
+  const res = await fetch(process.env.SLACK_WEBHOOK_URL!, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text: `New submission from ${name}`,   // fallback for notifications
+      blocks: [
+        { type: "header", text: { type: "plain_text", text: "New form submission" } },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Name:*\n${name}` },
+            { type: "mrkdwn", text: `*Email:*\n${email}` },
+          ],
+        },
+        { type: "section", text: { type: "mrkdwn", text: `*Message:*\n${message || "_(none)_"}` } },
+        { type: "context", elements: [{ type: "mrkdwn", text: `Received <!date^${Math.floor(Date.now()/1000)}^{date_short_pretty} at {time}|just now>` }] },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Slack webhook ${res.status}`);
+}
+```
+
+#### Discord — incoming webhook (embed)
+```ts
+async function notifyDiscord(name: string, email: string, message: string) {
+  const res = await fetch(process.env.DISCORD_WEBHOOK_URL!, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      embeds: [{
+        title: "New form submission",
+        color: 0x5865F2,
+        fields: [
+          { name: "Name",  value: name,  inline: true },
+          { name: "Email", value: email, inline: true },
+          { name: "Message", value: message?.slice(0, 1024) || "(none)" },
+        ],
+        timestamp: new Date().toISOString(),
+      }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Discord webhook ${res.status}`);
+}
+```
+
+#### Microsoft Teams — incoming webhook (Adaptive Card)
+```ts
+async function notifyTeams(name: string, email: string, message: string) {
+  const res = await fetch(process.env.TEAMS_WEBHOOK_URL!, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "message",
+      attachments: [{
+        contentType: "application/vnd.microsoft.card.adaptive",
+        content: {
+          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+          type: "AdaptiveCard", version: "1.4",
+          body: [
+            { type: "TextBlock", size: "Medium", weight: "Bolder", text: "New form submission" },
+            { type: "FactSet", facts: [{ title: "Name", value: name }, { title: "Email", value: email }] },
+            { type: "TextBlock", text: message || "(no message)", wrap: true },
+          ],
+        },
+      }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Teams webhook ${res.status}`);
+}
+```
+
+#### Retry on 429
+Webhook providers rate-limit. Wrap the call with a single retry honoring `Retry-After`:
+```ts
+async function postWithRetry(url: string, payload: unknown) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) return;
+    if (res.status === 429 && attempt === 0) {
+      const wait = Number(res.headers.get("retry-after") ?? 1) * 1000;
+      await new Promise(r => setTimeout(r, wait));
+      continue;
+    }
+    throw new Error(`webhook ${res.status}`);
+  }
+}
+```
+
+#### Env vars
+```
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...
+# or
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/.../...
+# or
+TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/...
+```
+
+#### Setup notes
+- **Slack**: App directory → "Incoming Webhooks" → add to channel → copy URL. Treat the URL as a secret; anyone with it can post.
+- **Discord**: Server settings → Integrations → Webhooks → New Webhook → copy URL.
+- **Teams**: Channel `…` → Connectors → Incoming Webhook → name + image → copy URL.
+- **Always escape user content in chat?** Slack/Discord/Teams treat their own markup as literal in `text`/`value` fields — no HTML execution — but truncate `message` to keep cards readable (1024 chars for Discord field values).
+- **Combine** with Option 2: write to DB first (durable record), then ping Slack (alert). If Slack fails, the submission is still safe.
+
+---
+
+### Option 4 — Generic outbound webhook (Zapier / Make / n8n / own backend)
+
+Original stub — use this when the user already has a downstream system they want to POST to.
+
+#### Client-side (works with any stack)
 ```ts
 const res = await fetch(process.env.NEXT_PUBLIC_WEBHOOK_URL!, {
   method: "POST",
@@ -612,7 +978,7 @@ const res = await fetch(process.env.NEXT_PUBLIC_WEBHOOK_URL!, {
 });
 ```
 
-### Minimal Next.js API route stub
+#### Minimal Next.js API route stub
 ```ts
 import { NextRequest, NextResponse } from "next/server";
 import { sanitizeInput }  from "@/utils/sanitizeInput";
@@ -621,34 +987,37 @@ import { isDuplicate }    from "@/utils/duplicateGuard";
 import { isSpam }         from "@/utils/spamFilter";
 
 export async function POST(req: NextRequest) {
-  // Body size guard
   const raw = await req.text();
-  if (raw.length > 50_000) {
-    return NextResponse.json({ error: "Request too large." }, { status: 413 });
-  }
+  if (raw.length > 50_000) return NextResponse.json({ error: "Request too large." }, { status: 413 });
   const body = JSON.parse(raw);
 
   const name    = sanitizeInput(body.name,    100);
   const email   = sanitizeInput(body.email,   254);
   const message = sanitizeInput(body.message, 5000);
 
-  if (!name || !email) {
-    return NextResponse.json({ error: "Required fields missing." }, { status: 400 });
-  }
+  if (!name || !email) return NextResponse.json({ error: "Required fields missing." }, { status: 400 });
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-  if (!EMAIL_RE.test(email)) {
-    return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
-  }
+  if (!EMAIL_RE.test(email)) return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
-  if (!checkRateLimit(ip))                                       return NextResponse.json({ error: "Too many requests.", }, { status: 429 });
-  if (body.website)                                              return NextResponse.json({ success: true });
-  if (!body._t || (Date.now() - Number(body._t)) < 3_000)       return NextResponse.json({ success: true });
-  if (isDuplicate(email))                                        return NextResponse.json({ success: true });
-  if (isSpam(message))                                           return NextResponse.json({ success: true });
+  if (!checkRateLimit(ip))                                 return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  if (body.website)                                        return NextResponse.json({ success: true });
+  if (!body._t || (Date.now() - Number(body._t)) < 3_000)  return NextResponse.json({ success: true });
+  if (isDuplicate(email))                                  return NextResponse.json({ success: true });
+  if (isSpam(message))                                     return NextResponse.json({ success: true });
 
-  // TODO: save to DB, forward to webhook, etc.
-  console.log("Form submission:", { name, email, message });
+  try {
+    const res = await fetch(process.env.WEBHOOK_URL!, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, message, receivedAt: new Date().toISOString() }),
+    });
+    if (!res.ok) throw new Error(`webhook ${res.status}`);
+  } catch (err) {
+    console.error("[webhook] forward failed:", err);
+    return NextResponse.json({ error: "Could not deliver. Try again." }, { status: 502 });
+  }
+
   return NextResponse.json({ success: true });
 }
 ```

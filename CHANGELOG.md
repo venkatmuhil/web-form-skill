@@ -6,6 +6,62 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.0] — 2026-05-12
+
+### Added
+
+#### references/email-services.md — no-3rd-party delivery paths
+- **Option 1 — SMTP via Nodemailer**: pooled transporter singleton, full Next.js API route, env vars for Google Workspace / Microsoft 365 / Amazon SES SMTP, deliverability notes
+- **Option 2 — Database persistence**: shared `submissions` schema (with `ip_hash` salted-SHA256), three recipes (Prisma, Supabase, raw `pg`), connection-pool guidance for serverless
+- **Option 3 — Slack / Discord / Microsoft Teams webhooks**: Block Kit, Embed, and Adaptive Card payloads; retry-with-`Retry-After` helper
+- **Option 4** renamed from "No Email / Webhook Only" to "Generic outbound webhook" with clearer framing
+- Replaced the prior 40-line webhook stub (which ended in `TODO: save to DB`) with the four concrete recipes above
+
+#### references/compliance.md (new file)
+- Phase 1 Q10 consent interview — privacy default, plus optional marketing / ToS / age / custom
+- Phase 4 consent UI patterns (single + multi-checkbox, React/Tailwind + plain HTML)
+- Rules: required consents unchecked by default, separate checkbox per consent, `target="_blank" rel="noopener"` on links
+- Phase 5 server-side `<key>ConsentedAt` timestamp persistence
+- Data retention strategies (forever / N-day purge / archive); Postgres, Supabase scheduled function, Vercel Cron recipes
+- IP hashing with salted SHA-256 + `IP_SALT` env var — never store raw IP
+- Right-to-be-forgotten request handling
+
+#### references/deployment.md (new file)
+- Pre-flight check (build clean, local submission verified, `.env.local` gitignored)
+- Platform matrix: Vercel, Netlify, Cloudflare Pages, Railway, Fly, Render, Docker/VPS — runtime model + env-var location
+- Serverless vs long-running comparison; **in-memory rate limiter must move to Upstash on serverless** (required, not optional)
+- Public vs server-only env-var classification — only `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` is browser-visible
+- Sender domain verification: SPF + DKIM + DMARC records, `dig` and MXToolbox checks before first send
+- Origin allow-list (`ALLOWED_ORIGINS`) tied to API-route step 0
+- Production smoke test scripts: real submission, bot-path silent-200, rate-limit fires
+- Lighthouse + axe accessibility pass on deployed URL
+- Monitoring per platform; Sentry/Axiom/Logflare hookup
+- Post-deploy hygiene: `.env.local` audit, key rotation, recurring DMARC review
+
+#### SKILL.md
+- Phase 1: Q6 expanded from "Which email service?" to "How should submissions be delivered?" — managed email options plus SMTP/Nodemailer, DB, Slack/Discord/Teams, generic webhook (combinable)
+- Phase 1: Q10 added — consent picker (privacy default, optional marketing/ToS/age/custom) with policy-URL capture and placeholder-page scaffolding
+- Phase 1: Q11 added — inline success vs thank-you page redirect (for analytics conversion tracking)
+- Phase 4: new "Consent layer" subsection — one checkbox per consent, unchecked by default, policy links with `rel="noopener"`
+- Phase 5: API route contract expanded from 7 steps to 9 — added **step 0 Origin check** (closes the `ALLOWED_ORIGINS` gap), step 4 consent validation, step 6 multi-channel delivery, step 8 real-failure logging
+- Phase 5: Delivery quick-pick table replaces service quick-pick — covers managed + no-3rd-party paths
+- Phase 5: Env-vars table expanded with SMTP, DB, chat-webhook, generic-webhook, and `IP_SALT` rows; columns now indicate which delivery option each variable applies to
+- Phase 6: renamed to "Post-Generation & **Local Verification**"; deployment steps explicitly excluded; ends with "Ready to deploy?" prompt that defers prod work to Phase 8
+- Phase 6 checklist: added consent + privacy status block; added bot-guard sanity-check instruction
+- **Phase 8 added — Deploy (user-initiated only)**: strict activation rule (local tests passed + explicit deploy request); 9-step walkthrough referencing `deployment.md`
+- Reference Files table: added `compliance.md` and `deployment.md` entries; updated `email-services.md` and `security-patterns.md` descriptions
+
+#### README.md
+- Restructured "What it does" — submission delivery now lists managed + no-3rd-party paths explicitly
+- Added compliance + Deploy phase bullets
+- Structure tree updated with `compliance.md` and `deployment.md`
+- Phases table updated: 11 interview questions, 8 phases, Phase 6 is local-only, Phase 8 is the new user-initiated Deploy
+
+### Fixed
+- `ALLOWED_ORIGINS` env var was previously listed in Phase 5 but never actually checked by the API-route contract — now enforced as step 0
+
+---
+
 ## [1.1.0] — 2026-05-12
 
 ### Added

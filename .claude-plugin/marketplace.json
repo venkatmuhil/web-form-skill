@@ -1,0 +1,14 @@
+{
+  "name": "web-forms-marketplace",
+  "owner": {
+    "name": "venkatmuhil"
+  },
+  "description": "Web-forms skill for Claude Code — full-stack production form generator.",
+  "plugins": [
+    {
+      "name": "web-forms",
+      "source": ".",
+      "description": "Build & audit production web forms (Brevo/Resend/SMTP/DB/Slack/webhook + security + a11y + consent)."
+    }
+  ]
+}

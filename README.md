@@ -67,15 +67,22 @@ Use this skill when asked to:
 ## Structure
 
 ```
-web-forms/
-├── SKILL.md                          # Main skill: Phase 0 triage → Build (1–8) or Audit (A)
-└── references/
-    ├── form-presets.md               # Field definitions per business type
-    ├── email-services.md             # Managed services + no-3rd-party paths (SMTP, DB, chat webhooks); attachments
-    ├── accessibility-patterns.md     # WCAG patterns, conditional logic, Typeform-style
-    ├── security-patterns.md          # Security utilities: escapeHtml, rate limiter, honeypot, reCAPTCHA v3, origin guard
-    ├── compliance.md                 # Consent checkboxes, policy-link scaffolding, data retention, IP hashing, RTBF
-    └── deployment.md                 # User-initiated Deploy phase: platform env vars, DNS verification, smoke tests
+web-form-skill/                       # repo root (also the plugin root)
+├── .claude-plugin/
+│   ├── plugin.json                   # Plugin manifest
+│   └── marketplace.json              # Marketplace catalog (1 plugin)
+├── skills/
+│   └── web-forms/
+│       ├── SKILL.md                  # Main skill: Phase 0 triage → Build (1–8) or Audit (A)
+│       └── references/
+│           ├── form-presets.md       # Field definitions per business type
+│           ├── email-services.md     # Managed services + no-3rd-party paths (SMTP, DB, chat webhooks); attachments
+│           ├── accessibility-patterns.md  # WCAG patterns, conditional logic, Typeform-style
+│           ├── security-patterns.md  # escapeHtml, rate limiter, honeypot, reCAPTCHA v3, origin guard
+│           ├── compliance.md         # Consent checkboxes, policy-link scaffolding, data retention, IP hashing, RTBF
+│           └── deployment.md         # User-initiated Deploy phase: platform env vars, DNS verification, smoke tests
+├── README.md
+└── CHANGELOG.md
 ```
 
 ## Phases
@@ -97,5 +104,63 @@ See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Installation
 
-Install this skill by dropping the `web-forms/` directory into your skills folder,
-or by using the `.skill` package file if your environment supports it.
+### Option 1 — Install as a plugin (recommended)
+
+Inside Claude Code, paste these two commands:
+
+```text
+/plugin marketplace add venkatmuhil/web-form-skill
+/plugin install web-forms@web-forms-marketplace
+```
+
+That's it. The skill auto-triggers when you ask Claude to "create a contact form", "audit my form", etc.
+
+- **Update:** `/plugin marketplace update web-forms-marketplace`
+- **Uninstall:** `/plugin uninstall web-forms@web-forms-marketplace`
+
+> Plugin skills are namespaced — if needed, invoke explicitly with `/web-forms:<action>`.
+
+### Option 2 — Install as a standalone skill (no plugin system)
+
+Pick a scope:
+
+**User scope** — available in every project on your machine:
+
+```bash
+git clone https://github.com/venkatmuhil/web-form-skill.git /tmp/web-form-skill && \
+  mkdir -p ~/.claude/skills && \
+  cp -R /tmp/web-form-skill/skills/web-forms ~/.claude/skills/ && \
+  rm -rf /tmp/web-form-skill
+```
+
+**Project scope** — committed with your repo, shared with teammates via git:
+
+```bash
+git clone https://github.com/venkatmuhil/web-form-skill.git /tmp/web-form-skill && \
+  mkdir -p .claude/skills && \
+  cp -R /tmp/web-form-skill/skills/web-forms .claude/skills/ && \
+  rm -rf /tmp/web-form-skill
+```
+
+Verify with `ls ~/.claude/skills/web-forms/SKILL.md` (or `.claude/skills/web-forms/SKILL.md` for project scope). Restart Claude Code, then ask "create a contact form" — the skill should trigger automatically.
+
+- **Update:** re-run the install one-liner, or `cd ~/.claude/skills/web-forms && git pull` if you installed via clone instead of copy.
+- **Uninstall:** `rm -rf ~/.claude/skills/web-forms`
+
+### Option 3 — Test locally without installing
+
+```bash
+git clone https://github.com/venkatmuhil/web-form-skill.git
+claude --plugin-dir ./web-form-skill
+```
+
+### Requirements
+
+- Claude Code CLI installed and authenticated — see the [Claude Code quickstart](https://code.claude.com/docs/en/quickstart).
+- Generated form code targets Next.js App Router by default; the skill detects other stacks (Remix, SvelteKit, Astro, plain HTML) during Phase 1's interview.
+
+### Troubleshooting
+
+- **Skill not triggering after install:** restart your Claude Code session, then run `/plugin` (or `/skills`) and confirm `web-forms` is listed.
+- **Standalone install — directory name must be exactly `web-forms`** (it must match the `name:` field in `SKILL.md` frontmatter). If you cloned the repo directly into `~/.claude/skills/`, rename the resulting folder to `web-forms`.
+- **Plugin not found:** run `/plugin marketplace update web-forms-marketplace` to refresh the catalog, then retry `/plugin install`.

@@ -1,0 +1,10 @@
+{
+  "name": "web-forms",
+  "description": "Build production-ready web forms — interview, generate, secure, deliver, audit.",
+  "version": "1.4.0",
+  "author": {
+    "name": "venkatmuhil"
+  },
+  "homepage": "https://github.com/venkatmuhil/web-form-skill",
+  "repository": "https://github.com/venkatmuhil/web-form-skill"
+}

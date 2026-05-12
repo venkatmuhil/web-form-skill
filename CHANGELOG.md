@@ -6,6 +6,45 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5.0] — 2026-05-12
+
+### Added — Design context probe (Phase 2.5)
+
+New `skills/web-forms/references/design-context.md` plus a new **Phase 2.5** in `SKILL.md`. Before any code is generated, the skill runs a bounded, read-only probe of the project to detect:
+
+- A design doc (`design.md` / `DESIGN.md` / `docs/design.md` / `docs/design-system.md`)
+- Token sources — `tailwind.config.{js,ts,mjs,cjs}` (`theme.colors`, `borderRadius`, `fontFamily`), then `tokens.json` / `design-tokens.json`, then CSS custom properties in `globals.css`
+- Component primitives — shadcn `components/ui/*`, Chakra, MUI, react-aria, or custom `components/Form*.tsx`
+- Dark-mode support (`dark:` variants or `[data-theme=dark]`)
+
+When tokens or primitives are detected, the generator substitutes them for inline hex (`bg-primary` instead of `bg-[#HEX]`) and imports existing primitives (`<Button>`, `<Input>`, `<Label>`) instead of hand-rolling markup. Phase 1 Q5 (brand colors) is skipped when tokens already exist. A single `🎨 Design context: …` line is shown to the user before Phase 3 so the probe results are visible and correctable. Phase A audits the existing form against the same probe and flags inline-hex / hand-rolled primitives / missing dark variants as P2 findings.
+
+### Added — Polish Layer (P2 opt-in)
+
+New "Polish Layer (P2 opt-in)" section in `references/accessibility-patterns.md` documenting eight independent upgrades that the generator does **not** include by default but can apply on request or offer during Audit: floating labels, character counter on textareas, button label morph (`Send → Sending → Sent ✓`), error summary at the top (GOV.UK pattern), dark-mode pass, inline help text under labels, optimistic ✓ on valid blur, and smart enter-key behavior for multi-step forms. Phase A.2 audit checklist now cross-links to this section.
+
+### Added — Per-field validation reference
+
+New `skills/web-forms/references/field-validation.md` covering the four field types most often shipped wrong: phone, email, URL/links (LinkedIn, GitHub, portfolio), and date of birth. Same reference drives both Greenfield generation and Audit findings.
+
+- Validation UX principles (validate on blur not on keystroke; specific error copy; pair color with icon + text per WCAG 1.4.1; never disable the submit button; respect `prefers-reduced-motion`).
+- Phone: `type=tel` + `inputmode=tel` + `autocomplete=tel`, format-as-you-type with `libphonenumber-js`'s `AsYouType`, blur-time `parsePhoneNumberFromString().isValid()`, server-side E.164 normalization.
+- Email: `inputmode=email` + `autocomplete=email` + `autocapitalize=off` + `spellcheck=false`, blur-time trim+lowercase, inline typo suggestion ("Did you mean alice@gmail.com?") against a small popular-domain table, optional disposable-domain reject server-side.
+- URL/links: `type=url` + `inputmode=url`, auto-prepend `https://` on blur, `new URL()` validation, server-side protocol allow-list (`http`/`https` only — blocks `javascript:` / `data:`), optional per-field hostname allow-list (e.g. `github.com`).
+- Date of birth: native `<input type="date">` with dynamic `min`/`max`, `autocomplete=bday`, UTC `Date.UTC` parse (never `new Date(userString)`), year/month/day age comparison (no leap-year drift), `[minAge, 120]` range. 3-select fallback pattern included.
+- Cross-field rules table (phone-or-email, preferred-contact coupling, age-gating).
+- Mobile-first throughout: 16px+ font (avoids iOS zoom), 44×44px tap targets.
+
+### Changed
+
+- `SKILL.md` Phase 1: added Q12 (DOB minimum age — 13/16/18/21/none) shown only when the preset includes a DOB field; drives the `max=` attribute and server-side age check.
+- `SKILL.md` Phase 4 "Client-side validation": replaced 3-bullet stub with the principles list and a pointer to the new reference.
+- `SKILL.md` Phase 5 step 3: widened "email regex" to "format validation per field type" with a pointer to the new reference.
+- `SKILL.md` Phase A.2 audit checklist: added a "Field-type validation" row so audits flag missing `type=tel`/`type=url`/`type=date`, missing `inputmode`/`autocomplete`, missing libphonenumber server check, and missing DOB age range as P1 findings.
+- `references/security-patterns.md`, `references/accessibility-patterns.md`, `references/form-presets.md`: cross-linked to the new reference at the relevant points; no behavior change.
+
+---
+
 ## [1.4.0] — 2026-05-12
 
 ### Changed — Distributable as a Claude Code plugin

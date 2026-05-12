@@ -101,6 +101,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 if (!EMAIL_RE.test(email)) {
   return NextResponse.json({ error: "Invalid email address." }, { status: 400 });
 }
+// For phone, URL, and date-of-birth fields, see references/field-validation.md
+// (parsePhoneNumberFromString().isValid() → E.164; new URL() + http(s) protocol
+// allow-list; UTC Date.UTC parse + year/month/day age check).
 
 // 4. Bot / abuse guards (all silent-200 — never tip off bots)
 const ip = req.headers.get("x-forwarded-for")?.split(",")[0].trim()

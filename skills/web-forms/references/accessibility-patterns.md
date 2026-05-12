@@ -776,6 +776,7 @@ turn a correct form into a *good* form.
 - Inputs full-width on viewports < 640px
 - Set `inputmode` (`email`, `tel`, `numeric`, `decimal`) and `autocomplete` (`email`, `name`, `tel`, `organization`, `street-address`, etc.) on every applicable field — saves the user 5–15 seconds and reduces typos
 - `enterkeyhint="next"` on intermediate fields, `enterkeyhint="send"` on the last one
+- For phone, email, URL/links, and date of birth, follow the per-field snippets in [field-validation.md](field-validation.md) — each ships the correct `type` + `inputmode` + `autocomplete` combo plus on-blur validation and 16px+ font (avoids iOS zoom-on-focus)
 
 ### Brand application
 - **One** accent color: primary CTA background, focus ring, active pill toggle, progress bar
@@ -797,3 +798,113 @@ turn a correct form into a *good* form.
 ### Audit shortcut
 
 When auditing an existing form, check these heuristics in this order: hierarchy → spacing → error UX → mobile attrs → brand color usage → microcopy → motion. The first three account for ~80% of "this form feels off" P2 findings.
+
+---
+
+## Polish Layer (P2 opt-in)
+
+These are **not** included in default generation. Offer them as P2 wins in
+Phase A audits, or apply when the user explicitly asks to "make the form
+feel premium". Each is independent — pick the ones that fit the audience.
+
+### 1. Floating labels
+Label sits inside the input at rest, shrinks above on focus or when the field has a value. Clearer than placeholder-only (placeholder disappears the moment users start typing) and saves vertical space — great for long forms on mobile.
+
+```tsx
+<div className="relative">
+  <input
+    id="email" name="email" type="email" placeholder=" "
+    className="peer w-full min-h-[44px] text-base px-3 pt-5 pb-1 border rounded
+               focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+  />
+  <label
+    htmlFor="email"
+    className="absolute left-3 top-3.5 text-gray-500 transition-all
+               peer-focus:top-1 peer-focus:text-xs peer-focus:text-primary
+               peer-[:not(:placeholder-shown)]:top-1 peer-[:not(:placeholder-shown)]:text-xs"
+  >
+    Email
+  </label>
+</div>
+```
+
+Rules: keep `placeholder=" "` (single space) so the `:not(:placeholder-shown)` selector works; never make the floating label the *only* label — keep `htmlFor` / `id` for screen readers.
+
+### 2. Character counter on textareas
+Show `0 / 500` under long-form fields. Turn red and `aria-invalid="true"` past the cap.
+
+```tsx
+const MAX = 500;
+<p className={`text-xs mt-1 text-right ${message.length > MAX ? "text-red-600" : "text-gray-500"}`}
+   aria-live="polite">
+  {message.length} / {MAX}
+</p>
+```
+
+`aria-live="polite"` makes the counter accessible without spamming the screen reader.
+
+### 3. Button label morph
+The submit button's text changes through the lifecycle instead of disappearing. Read by screen readers via `aria-live` on the button text.
+
+```tsx
+<button type="submit" disabled={loading || submitted} aria-busy={loading}
+        className="min-h-[44px] px-6 rounded bg-primary text-white">
+  <span aria-live="polite">
+    {submitted ? "Sent ✓" : loading ? "Sending…" : "Send message"}
+  </span>
+</button>
+```
+
+Pair with a brief 1-second hold on "Sent ✓" before the success state replaces the form — feels confirmed, not abrupt.
+
+### 4. Error summary at the top (long forms only — 8+ fields)
+Render a list of errors at the top of the form after a failed submit, each linking to the offending field. Mirrors GOV.UK pattern.
+
+```tsx
+{errorList.length > 0 && (
+  <div role="alert" tabIndex={-1} ref={summaryRef} className="border-2 border-red-600 p-4 mb-6">
+    <h2 className="font-bold mb-2">There is a problem</h2>
+    <ul className="list-disc pl-5">
+      {errorList.map(({ id, msg }) => (
+        <li key={id}><a href={`#${id}`} className="text-red-700 underline">{msg}</a></li>
+      ))}
+    </ul>
+  </div>
+)}
+```
+
+On submit failure, `summaryRef.current?.focus()` moves screen readers and keyboards straight to the summary; the anchor links then take them to each field. Replaces (does not duplicate) the existing "focus first invalid field" rule when present.
+
+### 5. Dark-mode pass
+If Phase 2.5 detected `dark:` variants anywhere in the project, every form surface gets a matching dark variant. Audit any existing form for missing dark variants on inputs, labels, borders, placeholder text, error text, and the success state.
+
+```tsx
+<input className="bg-white text-gray-900 border-gray-300 placeholder-gray-400
+                  dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder-gray-500" />
+```
+
+Test against `prefers-color-scheme: dark` *and* whatever class/data-attribute toggle the project uses.
+
+### 6. Inline help text (under-label, not placeholder)
+For fields where the format matters (DOB, phone with country code, password rules), put a short `id="*-help"` paragraph **above the input** and reference it from `aria-describedby`. Don't bury format rules in the placeholder — it vanishes the moment users focus.
+
+### 7. Optimistic input states
+When validation passes on blur, render a subtle ✓ inside the field's right padding. Don't combine with a green border — too loud. Keep the ring color reserved for focus.
+
+```tsx
+<div className="relative">
+  <input className="pr-9 …" />
+  {valid && !error && (
+    <span aria-hidden="true" className="absolute right-3 top-1/2 -translate-y-1/2 text-green-600">✓</span>
+  )}
+</div>
+```
+
+### 8. Smart enter-key behavior
+On multi-field forms, `Enter` in any text input submits — that's the default and usually fine. On Typeform-style and multi-step forms, intercept `Enter` to advance the step instead; use `enterkeyhint="next"` on intermediate fields and `enterkeyhint="send"` on the last one.
+
+---
+
+When the user agrees to the polish layer, apply items independently — don't
+treat it as all-or-nothing. Items 1, 3, and 7 give the biggest "feels
+premium" lift per line of code.

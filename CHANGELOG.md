@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.0] — 2026-05-12
+
+### Changed — Distributable as a Claude Code plugin
+
+The repo is now installable via the official plugin marketplace flow, in addition to the existing standalone install:
+
+- Added `.claude-plugin/plugin.json` (plugin manifest) and `.claude-plugin/marketplace.json` (marketplace catalog).
+- Moved `SKILL.md` and `references/` into `skills/web-forms/` so the repo matches the plugin layout Claude Code expects.
+- Rewrote the README **Installation** section with three copy-paste options: plugin install (`/plugin marketplace add` + `/plugin install`), standalone clone-and-copy (user or project scope), and local `--plugin-dir` testing. Added Requirements and Troubleshooting subsections.
+
+No changes to skill content, phases, or generated code.
+
+---
+
 ## [1.3.0] — 2026-05-12
 
 ### Added — Audit & Improve mode (existing forms)
